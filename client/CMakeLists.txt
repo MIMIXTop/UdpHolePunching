@@ -4,7 +4,9 @@ project(udp_client)
 set(CMAKE_CXX_STANDARD 23)
 find_package(Boost COMPONENTS REQUIRED asio)
 
-add_executable(udp_client src/main.cpp)
+add_executable(udp_client src/main.cpp
+        src/MakeStunRequest.hpp
+        src/MakeStunRequest.cpp)
 
 target_link_libraries(udp_client PRIVATE
         Boost::asio
