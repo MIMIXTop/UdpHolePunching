@@ -1,5 +1,6 @@
 {
-  "dependencies": [
-    "boost-asio"
-  ]
+  "dependencies" : [ {
+    "name" : "boost-asio",
+    "version>=" : "1.91.0"
+  } ]
 }
