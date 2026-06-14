@@ -13,7 +13,7 @@ int main() {
     try {
         asio::io_context io;
         udp::resolver resolver(io);
-        udp::endpoint endpoint = *resolver.resolve(udp::v4(), "stun.l.google.com", "19302").begin();
+        udp::endpoint endpoint = *resolver.resolve(udp::v4(), "127.0.0.1", "12345").begin();
         udp::socket socket(io);
         socket.open(udp::v4());
 
