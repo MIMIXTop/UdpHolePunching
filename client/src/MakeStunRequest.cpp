@@ -8,6 +8,8 @@
 
 namespace {
 
+
+
 }
 
 std::vector<uint8_t> Network::make_stun_request(Type::StunRequestType requestType) {

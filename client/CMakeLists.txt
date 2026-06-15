@@ -6,7 +6,11 @@ find_package(Boost COMPONENTS REQUIRED asio)
 
 add_executable(udp_client src/main.cpp
         src/MakeStunRequest.hpp
-        src/MakeStunRequest.cpp)
+        src/MakeStunRequest.cpp
+        src/Client.cpp
+        src/Client.hpp
+        src/Types/Type.hpp
+)
 
 target_link_libraries(udp_client PRIVATE
         Boost::asio

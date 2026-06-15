@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 namespace Network{
     namespace Type {
