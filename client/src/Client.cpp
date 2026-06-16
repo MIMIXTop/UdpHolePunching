@@ -79,7 +79,11 @@ namespace Network {
             co_return;
         }
 
-        std::vector<uint8_t> attr{response.begin() + 20, response.end()};
+        uint16_t response_size = 0;
+
+        std::memcpy(&response_size, &response[2], sizeof(response_size));
+
+        std::vector<uint8_t> attr{response.begin() + 20, response.begin() + 20 + response_size};
 
         if (attr.empty()) {
             std::cout << "Attribute is empty" << std::endl;
@@ -121,8 +125,7 @@ namespace Network {
 
     asio::awaitable<std::vector<uint8_t> > Client::sendMessage(std::span<uint8_t> message) {
         co_await socket_.async_send_to(asio::buffer(message), endpoint_, asio::use_awaitable);
-        udp::endpoint endpoint_receive;
-        std::vector<uint8_t> response(32);
+        std::vector<uint8_t> response(40);
         co_await socket_.async_receive_from(asio::buffer(response), endpoint_, asio::use_awaitable);
         co_return response;
     }
@@ -147,7 +150,6 @@ namespace Network {
         uint16_t response_type = 0x0000;
         std::memcpy(&response_type, &response[0], sizeof(response_type));
 
-
         if (static_cast<Type::StunRequestType>(response_type) == Type::StunRequestType::SuccessBinding) {
             serverConnected_ = true;
             std::println("Success");
@@ -157,7 +159,13 @@ namespace Network {
             co_return;
         }
 
-        std::vector<uint8_t> attr{response.begin() + 20, response.end() };
+        uint16_t response_size = 0;
+
+        std::memcpy(&response_size, &response[2], sizeof(response_size));
+
+        response_size = std::byteswap(response_size);
+
+        std::vector<uint8_t> attr{response.begin() + 20, response.begin() + 20 + response_size };
 
         uint16_t port = 0;
         std::array<uint8_t, 4> address{};
