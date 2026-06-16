@@ -20,16 +20,12 @@ namespace Network {
 
         asio::awaitable<void> worker(std::span<uint8_t> data, std::shared_ptr<udp::endpoint> endpoint);
 
-        StunMessage::StunMessageRequest parse_raw_message(std::span<uint8_t> data);
+        StunMessage::StunMessageRequest parseRawMessage(std::span<uint8_t> data);
+        std::vector<uint8_t> parseStunMessageToRaw(const StunMessage::StunMessageResponse& response);
 
-        void start_receive();
-        void handle_send(std::shared_ptr<std::vector<uint8_t>>, const boost::system::error_code& ec, std::size_t bytes_transferred);
-        void handle_receive( const boost::system::error_code& ec, std::size_t bytes_transferred);
-        std::vector<uint8_t> handle_request(std::shared_ptr<std::vector<uint8_t>> data, std::shared_ptr<udp::endpoint> ep);
+        std::vector<uint8_t> handleBindingRequest(const StunMessage::StunMessageRequest& message, std::shared_ptr<udp::endpoint> client_endpoint);
 
-        std::vector<uint8_t> handle_binding_request(StunMessage::StunMessageRequest message, std::shared_ptr<udp::endpoint> client_endpoint);
-
-        std::vector<uint8_t> handle_binding_request(const StunMessage::Header &header, std::shared_ptr<udp::endpoint> ep);
+        std::vector<uint8_t> handleBindingRequest(const StunMessage::Header &header, std::shared_ptr<udp::endpoint> ep);
 
         std::vector<Type::ConnectedClient> connected_clients {};
         int port_;

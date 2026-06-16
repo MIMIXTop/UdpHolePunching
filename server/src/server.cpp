@@ -5,16 +5,27 @@
 #include <boost/bind.hpp>
 #include <iostream>
 #include <print>
-#include <charconv>
 #include <ranges>
 #include <algorithm>
-#include <utility>
 
-Network::Server::Server(asio::io_context &io, short port) : port_(port), socket_(io, udp::endpoint(udp::v4(), port_)) {
-    asio::co_spawn(io, listen(), asio::detached);
+namespace {
+    Network::StunMessage::Type bytesToEnumRequest(uint16_t val) {
+        switch (static_cast<Network::StunMessage::Type>(val)) {
+            case Network::StunMessage::Type::BindingRequest:
+            case Network::StunMessage::Type::ConnectToClient:
+            case Network::StunMessage::Type::GetConnectedList:
+                return static_cast<Network::StunMessage::Type>(val);
+            default:
+                return Network::StunMessage::Type::Error;
+        }
+    }
 }
 
 namespace Network {
+    Server::Server(asio::io_context &io, short port) : port_(port), socket_(io, udp::endpoint(udp::v4(), port_)) {
+        asio::co_spawn(io, listen(), asio::detached);
+    }
+
     asio::awaitable<void> Server::listen() {
         auto executor = co_await asio::this_coro::executor;
         std::array<uint8_t, 1024> buffer;
@@ -38,13 +49,13 @@ namespace Network {
 
     asio::awaitable<void> Server::worker(std::span<uint8_t> data, std::shared_ptr<udp::endpoint> endpoint) {
         try {
-            auto message = parse_raw_message(data);
+            auto message = parseRawMessage(data);
 
             std::vector<uint8_t> response_buffer{};
 
             switch (message.header.message_type) {
                 case StunMessage::Type::BindingRequest:
-                    response_buffer = handle_binding_request(message, endpoint);
+                    response_buffer = handleBindingRequest(message, endpoint);
                     break;
                 default:
                     break;
@@ -52,7 +63,7 @@ namespace Network {
 
             co_await socket_.async_send_to(
                 asio::buffer(response_buffer),
-                endpoint_,
+                *endpoint,
                 asio::use_awaitable
             );
         } catch (const std::exception &e) {
@@ -60,131 +71,128 @@ namespace Network {
         }
     }
 
-    StunMessage::StunMessageRequest Server::parse_raw_message(std::span<uint8_t> data) {
-        return {};
+    StunMessage::StunMessageRequest Server::parseRawMessage(std::span<uint8_t> data) {
+        StunMessage::StunMessageRequest request{};
+
+        uint16_t message_type = 0;
+        std::memcpy(&message_type, &data[0], sizeof(message_type));
+        message_type = std::byteswap(message_type);
+        request.header.message_type = bytesToEnumRequest(message_type);
+
+        uint16_t message_size = 0;
+        std::memcpy(&message_size, &data[2], sizeof(message_size));
+        message_size = std::byteswap(message_size);
+        request.header.message_length = message_size;
+
+        uint32_t cookie = 0;
+        std::memcpy(&cookie, &data[4], sizeof(cookie));
+        cookie = std::byteswap(cookie);
+        request.header.cookie = cookie;
+
+        std::array<uint8_t, 12> tx_id{};
+        std::ranges::copy(data.begin() + 8, data.begin() + 20, tx_id.begin());
+        request.header.tx_id = tx_id;
+
+        std::vector<uint8_t> attr(message_size);
+        std::ranges::copy_n(data.begin() + 20, message_size, attr.begin());
+
+        switch (request.header.message_type) {
+            case StunMessage::Type::BindingRequest:
+                if (attr.empty()) {
+                    request.attribute = Type::Request::Error{.error = "Empty body"};
+                    break;
+                }
+
+                request.attribute = Type::Request::BindingAttribute {
+                    .clientName = std::string(attr.begin(), attr.end())
+                };
+                break;
+            case StunMessage::Type::ConnectToClient:
+                request.attribute = Type::Request::GetConnectedList{};
+                break;
+            case StunMessage::Type::GetConnectedList:
+                if (attr.empty()) {
+                    request.attribute = Type::Request::Error{.error = "Empty body"};
+                    break;
+                }
+
+                request.attribute = Type::Request::BindingAttribute {
+                    .clientName = std::string(attr.begin(), attr.end())
+                };
+                break;
+            default:
+                request.attribute = Type::Request::Error {
+                    .error = "Unknow method"
+                };
+                break;
+        }
+
+        return request;
     }
 
-    std::vector<uint8_t> Server::handle_binding_request(
-        StunMessage::StunMessageRequest message, std::shared_ptr<udp::endpoint> client_endpoint) {
-        return std::vector<uint8_t>{};
-    }
-}
+    std::vector<uint8_t> Server::parseStunMessageToRaw(const StunMessage::StunMessageResponse& response) {
 
-void Network::Server::start_receive() {
-    socket_.async_receive_from(
-        asio::buffer(buffer_), endpoint_,
-        boost::bind(&Server::handle_receive, this,
-                    asio::placeholders::error,
-                    asio::placeholders::bytes_transferred
-        )
-    );
-}
+        std::array<uint8_t, 20> header_bytes = StunMessage::castHeaderToBytes(response.header);
+        std::vector<uint8_t> body_buffer(response.header.message_length);
 
-void Network::Server::handle_send(std::shared_ptr<std::vector<uint8_t> >, const boost::system::error_code &ec,
-                                  size_t bytes_transferred) {
-    if (ec) {
-        std::cerr << "[Сеть] Ошибка отправки: " << ec.message() << "\n";
-    }
-
-    start_receive();
-}
-
-void Network::Server::handle_receive(const boost::system::error_code &ec, std::size_t bytes_transferred) {
-    start_receive();
-
-    if (!ec || ec == asio::error::message_size) {
-        std::cout << "Async received: " << std::string(buffer_.data(), bytes_transferred) << "\n";
-        std::cout << "Client address: " << endpoint_.address().to_string() << "\n";
-        std::cout << "Client port: " << endpoint_.port() << "\n";
-
-        const auto buffer = std::make_shared<std::vector<uint8_t> >(buffer_.begin(),
-                                                                    buffer_.begin() + bytes_transferred);
-        const auto endpoint = std::make_shared<udp::endpoint>(endpoint_);
-
-        auto result = std::make_shared<std::vector<uint8_t> >(handle_request(buffer, endpoint));
-
-        socket_.async_send_to(
-            asio::buffer(*result),
-            *endpoint,
-            boost::bind(
-                &Server::handle_send,
-                this,
-                result,
-                asio::placeholders::error,
-                asio::placeholders::bytes_transferred
-            )
+        std::visit(
+            util::match{
+                [&](const Type::Response::BindingResponse& item) {
+                    auto temp_port = std::byteswap(item.port);
+                    auto temp_address = item.address;
+                    std::memcpy(&body_buffer[0], &temp_port, sizeof(temp_port));
+                    std::memcpy(&body_buffer[2], &temp_address, sizeof(temp_address));
+                },
+                [&](const Type::Response::ConnectToClientResponse& item) {},
+                [&](const Type::Response::GetConnectedListResponse& item) {},
+                [&](const Type::Response::ErrorResponse& item) {},
+            },
+            response.attribute
         );
-    } else {
-        start_receive();
+
+        std::vector<uint8_t> response_raw(20 + body_buffer.size());
+
+        std::ranges::copy(header_bytes, response_raw.begin());
+        std::ranges::copy(body_buffer, response_raw.begin() + 20);
+
+        return response_raw;
     }
-}
 
-// std::vector<uint8_t> Network::Server::handle_request(std::shared_ptr<std::vector<uint8_t>> data, std::shared_ptr<udp::endpoint> ep) {
-//     if (data->empty()) {
-//         // ! FIXED:
-//         return {};
-//     }
-//
-//     if (data->size() < 20) {
-//         // !FIXED:
-//         return {};
-//     }
-//
-//     auto message = StunMessage::castBytesToStunMessage(*data);
-//
-//     switch (message.header.message_type) {
-//         case StunMessage::Type::BindingRequest:
-//             return handle_binding_request(message.header, std::move(ep));
-//         default:
-//             return {};
-//     }
-//     return {};
-//
-// }
+    std::vector<uint8_t> Server::handleBindingRequest(
+        const StunMessage::StunMessageRequest& message, std::shared_ptr<udp::endpoint> client_endpoint) {
 
+        StunMessage::StunMessageResponse response{};
 
-std::vector<uint8_t> Network::Server::handle_binding_request(const StunMessage::Header &header,
-                                                             std::shared_ptr<udp::endpoint> ep) {
-    auto address_vec = ep->address().to_v4().to_bytes();
-    uint32_t address;
+        auto attr = std::get<Type::Request::BindingAttribute>(message.attribute);
 
-    std::memcpy(&address, address_vec.data(), 4);
+        auto it = std::ranges::find(
+            connected_clients,
+            attr.clientName,
+            &Type::ConnectedClient::name
+        );
 
-    uint16_t port = ep->port();
-    std::array<uint8_t, 20> header_bytes{};
+        if (it == connected_clients.end()) {
+            connected_clients.push_back(Type::ConnectedClient{.name = attr.clientName, .endpoint = client_endpoint});
+        }
 
-    uint16_t res_type = static_cast<uint16_t>(StunMessage::Type::SuccessBinding);
-    res_type = std::byteswap(res_type);
-    std::memcpy(&header_bytes[0], &res_type, sizeof(res_type));
-    uint16_t message_size = 12;
-    message_size = std::byteswap(message_size);
-    std::memcpy(&header_bytes[2], &message_size, sizeof(message_size));
-    auto cookie = std::byteswap(header.cookie);
+        std::ranges::for_each(connected_clients, [](auto item) {
+            std::println("Connected clients: {}", item.name);
+        });
 
-    std::memcpy(&header_bytes[4], &cookie, sizeof(cookie));
-    auto tx_id = header.tx_id;
-    std::ranges::copy(tx_id, header_bytes.begin() + 8);
+        response.header.message_type = StunMessage::Type::SuccessBinding;
+        response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t);
+        response.header.cookie = message.header.cookie;
+        response.header.tx_id = message.header.tx_id;
 
-    std::array<uint8_t, 12> body_bytes{};
-    uint16_t body_type = 0x0020;
-    body_type = std::byteswap(body_type);
-    std::memcpy(&body_bytes[0], &body_type, sizeof(body_type));
-    uint16_t body_size = 8;
-    body_size = std::byteswap(body_size);
-    std::memcpy(&body_bytes[2], &body_size, sizeof(body_size));
-    uint8_t ip_family = 0x01;
-    ip_family = std::byteswap(ip_family);
-    body_bytes[4] = 0x00;
-    std::memcpy(&body_bytes[5], &ip_family, sizeof(ip_family));
-    port ^= 0x2112;
-    port = std::byteswap(port);
-    address ^= cookie;
-    std::memcpy(&body_bytes[6], &port, sizeof(port));
-    std::memcpy(&body_bytes[8], &address, sizeof(address));
+        uint32_t client_address = 0;
+        auto&& temp = client_endpoint->address().to_v4().to_bytes();
+        std::memcpy(&client_address, &temp[0], sizeof(client_address));
 
-    std::vector<uint8_t> response(header_bytes.size() + body_bytes.size(), 0);
-    std::ranges::copy(header_bytes, response.begin());
-    std::ranges::copy(body_bytes, response.begin() + header_bytes.size());
+        response.attribute = Type::Response::BindingResponse{
+            .port = client_endpoint->port(),
+            .address = client_address
+        };
 
-    return response;
+        return parseStunMessageToRaw(std::move(response));
+    }
 }

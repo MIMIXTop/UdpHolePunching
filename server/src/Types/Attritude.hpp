@@ -29,7 +29,10 @@ namespace Network::Type {
     }
 
     namespace Response {
-        struct BindingResponse {};
+        struct BindingResponse {
+            uint16_t port;
+            uint32_t address;
+        };
         struct ConnectToClientResponse {
             std::string clientName;
             uint32_t address;

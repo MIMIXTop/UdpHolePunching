@@ -43,7 +43,9 @@ namespace Network {
                     break;
             }
             std::print("Tap any button ... ");
-            std::cin >> number;
+            std::cin.ignore();
+            std::cin.clear();
+            std::cin.get();
             system("clear");
         }
     }
@@ -59,7 +61,7 @@ namespace Network {
     asio::awaitable<void> Client::bindingRequest() {
         std::array<uint8_t, 25> request{};
         uint16_t message_type = 0x0001;
-        uint16_t message_length = 0x0000;
+        uint16_t message_length = userName_.size();
         uint32_t cookie = 0x2112A442;
         std::vector<uint8_t> tx_id = make_transaction_identifier();
         message_type = std::byteswap(message_type);
@@ -83,6 +85,19 @@ namespace Network {
         } else {
             serverConnected_ = false;
             std::println("Failed");
+            co_return;
         }
+
+        std::vector<uint8_t> attr{response.begin() + 20, response.end() };
+
+        uint16_t port = 0;
+        std::array<uint8_t, 4> address{};
+
+        std::memcpy(&port, &attr[0], sizeof(port));
+        std::ranges::copy(attr.begin() + 2, attr.end(), address.begin());
+        port = std::byteswap(port);
+
+        std::println("Address is {}", address);
+        std::println("Port is {}", port);
     }
 }

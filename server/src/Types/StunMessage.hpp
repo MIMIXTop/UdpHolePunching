@@ -6,8 +6,8 @@
 #include <span>
 
 
-namespace Network {
-namespace StunMessage {
+
+namespace Network::StunMessage {
     enum class Type : uint16_t {
         BindingRequest = 0x0001,
         SuccessBinding = 0x0101,
@@ -36,10 +36,6 @@ namespace StunMessage {
     };
 
 
-    //static std::array<uint8_t, 20> castHeaderToBytes(Header header);
-    //static StunMessage castBytesToStunMessage(std::span<uint8_t> bytes);
-
-    Header header;
-
-};
+    std::array<uint8_t, 20> castHeaderToBytes(const Header& header);
 }
+
