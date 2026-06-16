@@ -57,6 +57,8 @@ namespace Network {
                 case StunMessage::Type::BindingRequest:
                     response_buffer = handleBindingRequest(message, endpoint);
                     break;
+                case StunMessage::Type::GetConnectedList:
+                    response_buffer = handleGetConnectionList(message, endpoint);
                 default:
                     break;
             }
@@ -144,7 +146,23 @@ namespace Network {
                     std::memcpy(&body_buffer[2], &temp_address, sizeof(temp_address));
                 },
                 [&](const Type::Response::ConnectToClientResponse& item) {},
-                [&](const Type::Response::GetConnectedListResponse& item) {},
+                [&](const Type::Response::GetConnectedListResponse& item) {
+                    size_t offset = 0;
+
+                    uint16_t client_count = std::byteswap(static_cast<uint16_t>(connected_clients.size()));
+                    std::memcpy(&body_buffer[offset], &client_count, sizeof(client_count));
+                    offset += sizeof(client_count);
+
+                    for (auto&& name : item.connectedList) {
+                        uint16_t name_size = std::byteswap(static_cast<uint16_t>(name.size()));
+
+                        std::memcpy(&body_buffer[offset], &name_size, sizeof(name_size));
+                        offset += sizeof(name_size);
+
+                        std::ranges::copy(name, body_buffer.begin() + offset);
+                        offset += name.size();
+                    }
+                },
                 [&](const Type::Response::ErrorResponse& item) {},
             },
             response.attribute
@@ -175,10 +193,6 @@ namespace Network {
             connected_clients.push_back(Type::ConnectedClient{.name = attr.clientName, .endpoint = client_endpoint});
         }
 
-        std::ranges::for_each(connected_clients, [](auto item) {
-            std::println("Connected clients: {}", item.name);
-        });
-
         response.header.message_type = StunMessage::Type::SuccessBinding;
         response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t);
         response.header.cookie = message.header.cookie;
@@ -193,6 +207,33 @@ namespace Network {
             .address = client_address
         };
 
-        return parseStunMessageToRaw(std::move(response));
+        return parseStunMessageToRaw(response);
+    }
+
+    std::vector<uint8_t> Server::handleGetConnectionList(const StunMessage::StunMessageRequest &message,
+        std::shared_ptr<udp::endpoint> client_endpoint) {
+
+        StunMessage::StunMessageResponse response{};
+
+        response.header.message_type = StunMessage::Type::SuccessConnectedList;
+        response.header.message_length = sizeof(Type::Response::GetConnectedListResponse) * connected_clients.size();
+
+        response.header.cookie = message.header.cookie;
+        response.header.tx_id = message.header.tx_id;
+
+        Type::Response::GetConnectedListResponse body;
+        body.connectedList.reserve(connected_clients.size());
+
+        uint16_t total_length = sizeof(uint16_t);
+
+        std::ranges::for_each(connected_clients, [&](auto&& item) {
+            body.connectedList.push_back(item.name);
+
+            total_length += sizeof(uint16_t) + item.name.size();
+        });
+        response.header.message_length = total_length;
+        response.attribute = body;
+
+        return parseStunMessageToRaw(response);
     }
 }

@@ -25,7 +25,7 @@ namespace Network {
 
         std::vector<uint8_t> handleBindingRequest(const StunMessage::StunMessageRequest& message, std::shared_ptr<udp::endpoint> client_endpoint);
 
-        std::vector<uint8_t> handleBindingRequest(const StunMessage::Header &header, std::shared_ptr<udp::endpoint> ep);
+        std::vector<uint8_t> handleGetConnectionList(const StunMessage::StunMessageRequest& message, std::shared_ptr<udp::endpoint> client_endpoint);
 
         std::vector<Type::ConnectedClient> connected_clients {};
         int port_;

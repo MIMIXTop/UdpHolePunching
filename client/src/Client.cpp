@@ -33,6 +33,7 @@ namespace Network {
                     co_await bindingRequest();
                     break;
                 case 2:
+                    co_await getListConnectedUsers();
                     std::println("I'm a teapod");
                     break;
                 case 3:
@@ -50,11 +51,79 @@ namespace Network {
         }
     }
 
+    asio::awaitable<void> Client::getListConnectedUsers() {
+        std::array<uint8_t, 20> request{};
+        uint16_t message_type = 0x0002;
+        uint16_t message_length = 0;
+        uint32_t cookie = 0x2112A442;
+        std::vector<uint8_t> tx_id = make_transaction_identifier();
+        message_type = std::byteswap(message_type);
+        std::memcpy(&request[0], &message_type, sizeof(message_type));
+        message_length = std::byteswap(message_length);
+        std::memcpy(&request[2], &message_length, sizeof(message_length));
+        cookie = std::byteswap(cookie);
+        std::memcpy(&request[4], &cookie, sizeof(cookie));
+        std::ranges::copy(tx_id, request.begin() + 8);
+
+        std::vector<uint8_t> response = co_await sendMessage(request);
+        uint16_t response_type = 0x0000;
+        std::memcpy(&response_type, &response[0], sizeof(response_type));
+        response_type = std::byteswap(response_type);
+
+        if (static_cast<Type::StunRequestType>(response_type) == Type::StunRequestType::SuccessConnectedList) {
+            serverConnected_ = true;
+            std::println("Success");
+        } else {
+            serverConnected_ = false;
+            std::println("Failed");
+            co_return;
+        }
+
+        std::vector<uint8_t> attr{response.begin() + 20, response.end()};
+
+        if (attr.empty()) {
+            std::cout << "Attribute is empty" << std::endl;
+            co_return;
+        }
+
+        size_t offset = 0;
+
+        uint16_t count = 0;
+        std::memcpy(&count, &attr[offset], sizeof(count));
+        count = std::byteswap(count);
+        offset += sizeof(count);
+
+        std::vector<std::string> usersName;
+
+        usersName.reserve(count);
+
+        for (uint16_t i = 0; i < count; ++i) {
+            if (offset + sizeof(uint16_t) > attr.size()) {
+                break;
+            }
+
+            uint16_t name_size = 0;
+            std::memcpy(&name_size, &attr[offset], sizeof(name_size));
+            name_size = std::byteswap(name_size);
+            offset += sizeof(name_size);
+
+            if (offset + name_size > attr.size()) {
+                break;
+            }
+
+            std::string name(reinterpret_cast<const char*>(&attr[offset]), name_size);
+            usersName.push_back(std::move(name));
+            offset += name_size;
+        }
+
+        std::println("Users name is {}", usersName);
+    }
+
     asio::awaitable<std::vector<uint8_t> > Client::sendMessage(std::span<uint8_t> message) {
         co_await socket_.async_send_to(asio::buffer(message), endpoint_, asio::use_awaitable);
         udp::endpoint endpoint_receive;
         std::vector<uint8_t> response(32);
-        co_await socket_.async_receive_from(asio::buffer(response), endpoint_receive, asio::use_awaitable);
+        co_await socket_.async_receive_from(asio::buffer(response), endpoint_, asio::use_awaitable);
         co_return response;
     }
 
@@ -79,7 +148,7 @@ namespace Network {
         std::memcpy(&response_type, &response[0], sizeof(response_type));
 
 
-        if (static_cast<Type::StunRequestType>(response_type) == Type::StunRequestType::Success) {
+        if (static_cast<Type::StunRequestType>(response_type) == Type::StunRequestType::SuccessBinding) {
             serverConnected_ = true;
             std::println("Success");
         } else {
