@@ -47,7 +47,7 @@ namespace Network::Type {
             std::string error;
         };
 
-        using Attribute = std::variant<BindingResponse, GetConnectedListResponse, ErrorResponse>;
+        using Attribute = std::variant<BindingResponse, GetConnectedListResponse, ErrorResponse, ConnectToClientResponse>;
     }
 }
 

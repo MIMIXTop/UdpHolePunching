@@ -110,7 +110,14 @@ namespace Network {
                 };
                 break;
             case StunMessage::Type::ConnectToClient:
-                request.attribute = Type::Request::GetConnectedList{};
+                if (attr.empty()) {
+                    request.attribute = Type::Request::Error{.error = "Empty body"};
+                    break;
+                }
+
+                request.attribute = Type::Request::ConnectToClientAttribute{
+                    .clientName = std::string(attr.begin(), attr.end())
+                };
                 break;
             case StunMessage::Type::GetConnectedList:
                 if (attr.empty()) {
@@ -145,7 +152,13 @@ namespace Network {
                     std::memcpy(&body_buffer[0], &temp_port, sizeof(temp_port));
                     std::memcpy(&body_buffer[2], &temp_address, sizeof(temp_address));
                 },
-                [&](const Type::Response::ConnectToClientResponse& item) {},
+                [&](const Type::Response::ConnectToClientResponse& item) {
+                    auto temp_port = std::byteswap(item.port);
+                    auto temp_address = item.address;
+                    std::ranges::copy(item.clientName, body_buffer.begin());
+                    std::memcpy(&body_buffer[item.clientName.size()], &temp_port, sizeof(temp_port));
+                    std::memcpy(&body_buffer[item.clientName.size() + 2], &temp_address, sizeof(temp_address));
+                },
                 [&](const Type::Response::GetConnectedListResponse& item) {
                     size_t offset = 0;
 
@@ -233,6 +246,50 @@ namespace Network {
         });
         response.header.message_length = total_length;
         response.attribute = body;
+
+        return parseStunMessageToRaw(response);
+    }
+
+    std::vector<uint8_t> Server::handleConnectToClient(const StunMessage::StunMessageRequest &message,
+        std::shared_ptr<udp::endpoint> client_endpoint) {
+        StunMessage::StunMessageResponse response{};
+
+        auto attr = std::get<Type::Request::ConnectToClientAttribute>(message.attribute);
+        auto it = std::ranges::find(
+            connected_clients,
+            attr.clientName,
+            &Type::ConnectedClient::name
+        );
+
+        if (it == connected_clients.end()) {
+            response.header.message_type = StunMessage::Type::Error;
+            response.header.cookie = message.header.cookie;
+            response.header.tx_id = message.header.tx_id;
+
+            response.attribute = Type::Response::ErrorResponse{
+                .error = "Not found client"
+            };
+            response.header.message_length = 16;
+
+            return parseStunMessageToRaw(response);
+        }
+
+        response.header.message_type = StunMessage::Type::SuccessConnectToClient;
+        response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t) + attr.clientName.size();
+        response.header.cookie = message.header.cookie;
+        response.header.tx_id = message.header.tx_id;
+
+        auto&& res_attr = *it;
+
+        uint32_t client_address = 0;
+        auto temp = res_attr.endpoint->address().to_v4().to_bytes();
+        std::memcpy(&client_address, &temp[0], sizeof(client_address));
+
+        response.attribute = Type::Response::ConnectToClientResponse{
+            .clientName = attr.clientName,
+            .address = client_address,
+            .port =res_attr.endpoint->port()
+        };
 
         return parseStunMessageToRaw(response);
     }
