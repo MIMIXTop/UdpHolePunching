@@ -24,7 +24,7 @@ namespace Network {
         for (;;) {
             int number = 0;
             std::println("1. Connect to server");
-            std::println("2. I'm a teapod");
+            std::println("2. Get a list of users connected to the server");
             std::println("3. Hello PC");
             std::print("Input your choice: ");
             std::cin >> number;
@@ -34,7 +34,6 @@ namespace Network {
                     break;
                 case 2:
                     co_await getListConnectedUsers();
-                    std::println("I'm a teapod");
                     break;
                 case 3:
                     std::println("Hello PC");
