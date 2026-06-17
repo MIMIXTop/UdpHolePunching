@@ -17,7 +17,8 @@ namespace Network::Type {
         };
 
         struct ConnectToClientAttribute {
-            std::string clientName;
+            std::string clientNameToConnect;
+            std::string clientNameHost;
         };
 
         struct Error {

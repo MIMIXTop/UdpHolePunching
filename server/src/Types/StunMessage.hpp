@@ -15,6 +15,7 @@ namespace Network::StunMessage {
         SuccessConnectedList = 0x0102,
         ConnectToClient = 0x0003,
         SuccessConnectToClient = 0x0103,
+        ConnectToHost = 0x0104,
         Error = 0x1111,
     };
 
@@ -37,5 +38,7 @@ namespace Network::StunMessage {
 
 
     std::array<uint8_t, 20> castHeaderToBytes(const Header& header);
+
+    std::vector<uint8_t> make_transaction_identifier();
 }
 

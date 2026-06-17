@@ -1,6 +1,7 @@
 #include "StunMessage.hpp"
 
 #include <span>
+#include <random>
 
 namespace Network {
     std::array<uint8_t, 20> StunMessage::castHeaderToBytes(const Header &header) {
@@ -21,5 +22,19 @@ namespace Network {
         std::ranges::copy(header.tx_id, bytes.begin() + 8);
 
         return bytes;
+    }
+
+    std::vector<uint8_t> make_transaction_identifier() {
+        std::vector<uint8_t> identifier(12,0);
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution distribution(0, 255);
+
+        for (auto&& item : identifier) {
+            item = distribution(gen);
+        }
+
+        return identifier;
     }
 }

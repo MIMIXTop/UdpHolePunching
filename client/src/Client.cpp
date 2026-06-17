@@ -25,7 +25,7 @@ namespace Network {
             int number = 0;
             std::println("1. Connect to server");
             std::println("2. Get a list of users connected to the server");
-            std::println("3. Hello PC");
+            std::println("3. Connect to client");
             std::print("Input your choice: ");
             std::cin >> number;
             switch (number) {

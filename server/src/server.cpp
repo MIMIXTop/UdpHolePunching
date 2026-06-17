@@ -59,6 +59,9 @@ namespace Network {
                     break;
                 case StunMessage::Type::GetConnectedList:
                     response_buffer = handleGetConnectionList(message, endpoint);
+
+                case StunMessage::Type::ConnectToClient:
+                    response_buffer = co_await handleConnectToClient(message, endpoint);
                 default:
                     break;
             }
@@ -109,16 +112,36 @@ namespace Network {
                     .clientName = std::string(attr.begin(), attr.end())
                 };
                 break;
-            case StunMessage::Type::ConnectToClient:
+            case StunMessage::Type::ConnectToClient: {
                 if (attr.empty()) {
                     request.attribute = Type::Request::Error{.error = "Empty body"};
                     break;
                 }
+                uint16_t hostNameSize = 0;
+                std::memcpy(&hostNameSize, &attr[0], sizeof(hostNameSize));
+                std::string host_str;
+                std::ranges::copy(
+                    attr.begin() + sizeof(hostNameSize),
+                    attr.begin() + sizeof(hostNameSize) + hostNameSize,
+                    host_str.begin()
+                );
+
+                uint16_t connectNameSize = 0;
+                std::memcpy(&connectNameSize, &attr[sizeof(hostNameSize) + hostNameSize], sizeof(connectNameSize));
+                std::string connect_str;
+                std::ranges::copy(
+                    attr.begin() + sizeof(hostNameSize) + hostNameSize + sizeof(connectNameSize),
+                    attr.begin() + sizeof(hostNameSize) + hostNameSize + sizeof(connectNameSize) + connectNameSize,
+                    host_str.begin()
+                );
 
                 request.attribute = Type::Request::ConnectToClientAttribute{
-                    .clientName = std::string(attr.begin(), attr.end())
+                    .clientNameToConnect = connect_str,
+                    .clientNameHost = host_str
                 };
+
                 break;
+            }
             case StunMessage::Type::GetConnectedList:
                 if (attr.empty()) {
                     request.attribute = Type::Request::Error{.error = "Empty body"};
@@ -250,14 +273,14 @@ namespace Network {
         return parseStunMessageToRaw(response);
     }
 
-    std::vector<uint8_t> Server::handleConnectToClient(const StunMessage::StunMessageRequest &message,
+    asio::awaitable<std::vector<uint8_t>> Server::handleConnectToClient(const StunMessage::StunMessageRequest &message,
         std::shared_ptr<udp::endpoint> client_endpoint) {
         StunMessage::StunMessageResponse response{};
 
         auto attr = std::get<Type::Request::ConnectToClientAttribute>(message.attribute);
         auto it = std::ranges::find(
             connected_clients,
-            attr.clientName,
+            attr.clientNameToConnect,
             &Type::ConnectedClient::name
         );
 
@@ -271,11 +294,11 @@ namespace Network {
             };
             response.header.message_length = 16;
 
-            return parseStunMessageToRaw(response);
+            co_return parseStunMessageToRaw(response);
         }
 
         response.header.message_type = StunMessage::Type::SuccessConnectToClient;
-        response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t) + attr.clientName.size();
+        response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t) + attr.clientNameToConnect.size();
         response.header.cookie = message.header.cookie;
         response.header.tx_id = message.header.tx_id;
 
@@ -286,11 +309,21 @@ namespace Network {
         std::memcpy(&client_address, &temp[0], sizeof(client_address));
 
         response.attribute = Type::Response::ConnectToClientResponse{
-            .clientName = attr.clientName,
+            .clientName = attr.clientNameToConnect,
             .address = client_address,
             .port =res_attr.endpoint->port()
         };
 
-        return parseStunMessageToRaw(response);
+        co_return parseStunMessageToRaw(response);
     }
+
+    asio::awaitable<void> Server::sendConnectMessage(const Type::ConnectedClient &client,
+        const Type::ConnectedClient &host) {
+
+        StunMessage::StunMessageResponse response{};
+
+        response.header.message_type = StunMessage::Type::ConnectToHost;
+
+    }
+
 }

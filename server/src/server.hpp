@@ -27,7 +27,9 @@ namespace Network {
 
         std::vector<uint8_t> handleGetConnectionList(const StunMessage::StunMessageRequest& message, std::shared_ptr<udp::endpoint> client_endpoint);
 
-        std::vector<uint8_t> handleConnectToClient(const StunMessage::StunMessageRequest& message, std::shared_ptr<udp::endpoint> client_endpoint);
+        asio::awaitable<std::vector<uint8_t>> handleConnectToClient(const StunMessage::StunMessageRequest& message, std::shared_ptr<udp::endpoint> client_endpoint);
+
+        asio::awaitable<void> sendConnectMessage(const Type::ConnectedClient& client, const Type::ConnectedClient& host);
 
         std::vector<Type::ConnectedClient> connected_clients {};
         int port_;
