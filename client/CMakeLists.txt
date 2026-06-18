@@ -3,6 +3,7 @@ project(udp_client)
 
 set(CMAKE_CXX_STANDARD 23)
 find_package(Boost COMPONENTS REQUIRED asio)
+find_package(msquic CONFIG REQUIRED)
 
 add_executable(udp_client src/main.cpp
         src/MakeStunRequest.hpp
@@ -14,4 +15,5 @@ add_executable(udp_client src/main.cpp
 
 target_link_libraries(udp_client PRIVATE
         Boost::asio
+        msquic
 )

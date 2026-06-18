@@ -39,6 +39,6 @@ namespace Network::StunMessage {
 
     std::array<uint8_t, 20> castHeaderToBytes(const Header& header);
 
-    std::vector<uint8_t> make_transaction_identifier();
+    std::array<uint8_t, 12> make_transaction_identifier();
 }
 

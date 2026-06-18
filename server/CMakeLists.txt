@@ -3,6 +3,7 @@ project(udp_server)
 
 set(CMAKE_CXX_STANDARD 23)
 find_package(Boost COMPONENTS REQUIRED asio)
+find_package(msquic CONFIG REQUIRED)
 
 add_executable(udp_server src/main.cpp src/server.cpp
         src/Types/StunMessage.cpp
@@ -11,4 +12,5 @@ add_executable(udp_server src/main.cpp src/server.cpp
 
 target_link_libraries(udp_server PRIVATE
         Boost::asio
+        msquic
 )

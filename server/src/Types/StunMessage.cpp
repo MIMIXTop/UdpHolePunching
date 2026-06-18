@@ -24,8 +24,8 @@ namespace Network {
         return bytes;
     }
 
-    std::vector<uint8_t> make_transaction_identifier() {
-        std::vector<uint8_t> identifier(12,0);
+    std::array<uint8_t, 12> make_transaction_identifier() {
+        std::array<uint8_t, 12> identifier{};
 
         std::random_device rd;
         std::mt19937 gen(rd());

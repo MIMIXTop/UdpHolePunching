@@ -122,6 +122,9 @@ namespace Network {
         std::println("Users name is {}", usersName);
     }
 
+    asio::awaitable<void> Client::CoonnectToClient(std::string_view clientName) {
+    }
+
     asio::awaitable<std::vector<uint8_t> > Client::sendMessage(std::span<uint8_t> message) {
         co_await socket_.async_send_to(asio::buffer(message), endpoint_, asio::use_awaitable);
         std::vector<uint8_t> response(40);

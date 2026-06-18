@@ -15,6 +15,7 @@ namespace Network {
         asio::awaitable<void> bindingRequest();
         asio::awaitable<void> listener();
         asio::awaitable<void> getListConnectedUsers();
+        asio::awaitable<void> CoonnectToClient(std::string_view clientName);
         asio::awaitable<std::vector<uint8_t>> sendMessage(std::span<uint8_t> message);
         asio::any_io_executor get_executor();
     private:
