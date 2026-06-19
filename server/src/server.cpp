@@ -54,13 +54,19 @@ namespace Network {
 
             switch (message.header.message_type) {
                 case StunMessage::Type::BindingRequest:
+                    std::println("BindingRequest Start");
                     response_buffer = handleBindingRequest(message, endpoint);
+                    std::println("Binding Request Success");
                     break;
                 case StunMessage::Type::GetConnectedList:
+                    std::println("GetConnectedList Start");
                     response_buffer = handleGetConnectionList(message, endpoint);
+                    std::println("GetConnectedList Success");
                     break;
                 case StunMessage::Type::ConnectToClient:
+                    std::println("ConnectToClient Start");
                     response_buffer = co_await handleConnectToClient(message, endpoint);
+                    std::println("ConnectToClient Success");
                     break;
                 default:
                     break;
@@ -113,17 +119,22 @@ namespace Network {
                 };
                 break;
             case StunMessage::Type::ConnectToClient: {
-                if (attr.empty()) {
+                if (attr.size() < sizeof(uint16_t)) {
                     request.attribute = Type::Request::Error{.error = "Empty body"};
                     break;
                 }
                 uint16_t connectNameSize = 0;
                 std::memcpy(&connectNameSize, &attr[0], sizeof(connectNameSize));
-                std::string connect_str;
-                std::ranges::copy(
+                connectNameSize = std::byteswap(connectNameSize);
+
+                if (attr.size() < sizeof(connectNameSize) + connectNameSize) {
+                    request.attribute = Type::Request::Error{.error = "Invalid body"};
+                    break;
+                }
+
+                std::string connect_str(
                     attr.begin() + sizeof(connectNameSize),
-                    attr.begin() + sizeof(connectNameSize) + connectNameSize,
-                    connect_str.begin()
+                    attr.begin() + sizeof(connectNameSize) + connectNameSize
                 );
 
                 request.attribute = Type::Request::ConnectToClientAttribute{
@@ -133,14 +144,7 @@ namespace Network {
                 break;
             }
             case StunMessage::Type::GetConnectedList:
-                if (attr.empty()) {
-                    request.attribute = Type::Request::Error{.error = "Empty body"};
-                    break;
-                }
-
-                request.attribute = Type::Request::BindingAttribute{
-                    .clientName = std::string(attr.begin(), attr.end())
-                };
+                request.attribute = Type::Request::GetConnectedList{};
                 break;
             default:
                 request.attribute = Type::Request::Error{
@@ -287,10 +291,14 @@ namespace Network {
         }
 
         auto &&res_attr = *it;
-        if (
-            const auto it_host = std::ranges::find(connected_clients, client_endpoint, &Type::ConnectedClient::endpoint)
-            ;
-            it_host != connected_clients.end()) {
+        const auto it_host = std::ranges::find_if(
+            connected_clients,
+            [&](const Type::ConnectedClient& item) {
+                return *item.endpoint == *client_endpoint;
+            }
+        );
+
+        if (it_host != connected_clients.end()) {
             const auto &host = *it_host;
             co_await sendConnectMessage(res_attr, host);
         } else {
@@ -330,7 +338,7 @@ namespace Network {
         response.header.message_type = StunMessage::Type::ConnectToHost;
         response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t) + host.name.size();
         response.header.cookie = 0x2112A442;
-        response.header.tx_id = StunMessage::make_transaction_identifier();
+        response.header.tx_id =  StunMessage::make_transaction_identifier(); //StunMessage::make_transaction_identifier();
 
         response.attribute = Type::Response::ConnectToClientResponse{
             .clientName = host.name,

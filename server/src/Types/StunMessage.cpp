@@ -3,8 +3,8 @@
 #include <span>
 #include <random>
 
-namespace Network {
-    std::array<uint8_t, 20> StunMessage::castHeaderToBytes(const Header &header) {
+namespace Network::StunMessage {
+    std::array<uint8_t, 20> castHeaderToBytes(const Header &header) {
         std::array<uint8_t, 20> bytes{};
         auto type_bytes = static_cast<uint16_t>(header.message_type);
 

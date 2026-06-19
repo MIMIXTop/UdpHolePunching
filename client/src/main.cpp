@@ -12,11 +12,11 @@ int main() {
     namespace asio = boost::asio;
     using udp = asio::ip::udp;
 
-    asio::io_context context;
+    asio::io_context context{8};
 
     Network::Client client(context, "127.0.0.1", "12345", "UserA");
 
-    asio::co_spawn(context, client.listener(), asio::detached);
+    //asio::co_spawn(context, client.listener(), asio::detached);
 
     context.run();
     // try {

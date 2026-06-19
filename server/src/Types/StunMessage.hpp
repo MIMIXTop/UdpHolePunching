@@ -3,9 +3,6 @@
 
 #include <cstdint>
 #include <array>
-#include <span>
-
-
 
 namespace Network::StunMessage {
     enum class Type : uint16_t {
