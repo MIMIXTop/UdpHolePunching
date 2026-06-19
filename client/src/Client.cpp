@@ -8,7 +8,7 @@
 #include <iostream>
 #include <print>
 
-#include "../../server/src/util/Match.hpp"
+#include "util/Match.hpp"
 
 #include <algorithm>
 #include <array>
