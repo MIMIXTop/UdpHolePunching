@@ -14,6 +14,8 @@ namespace Network {
             GetConnectedList = 0x0002,
             SuccessConnectedList = 0x0102,
             ConnectToClient = 0x0003,
+            ServerPunch = 0x0004,
+            ClientPunch = 0x0005,
             SuccessConnectToClient = 0x0103,
             ConnectToHost = 0x0104,
             Error = 0x1111,

@@ -1,0 +1,69 @@
+//
+// Created by mimixtop on 19.06.2026.
+//
+
+#include "Stream.hpp"
+
+#include <memory>
+#include <string>
+#include <iostream>
+
+
+namespace P2P {
+    Stream::Stream(const MsQuicConnection &conn) :
+     stream_(conn, QUIC_STREAM_OPEN_FLAG_NONE, CleanUpAutoDelete, CallbackHandle, this) {
+        stream_.Start();
+    }
+
+    Stream::Stream(HQUIC native_stream) : stream_(native_stream, CleanUpAutoDelete, CallbackHandle, this) {
+    }
+
+    void Stream::OnDataReceive(std::string_view data) {
+        std::cout << "Получено: " << data << "\n";
+    }
+
+    void Stream::OnSendComplete(void *clientContext) {
+        std::cout << "Сообщение успешно доставлено другу.\n";
+    }
+
+    void Stream::OnPeerShutdown() {
+    }
+
+    void Stream::Send(std::string& data, void *context) {
+        auto* buffer = new QUIC_BUFFER();
+        buffer->Buffer = reinterpret_cast<uint8_t *>(data.data());
+        buffer->Length = data.size();
+
+        stream_.Send(buffer, 1, QUIC_SEND_FLAG_FIN);
+    }
+
+    QUIC_STATUS QUIC_API Stream::CallbackHandle(MsQuicStream* stream, void *context, QUIC_STREAM_EVENT *event) {
+
+        auto* self = static_cast<Stream*>(context);
+
+        switch (event->Type) {
+            case QUIC_STREAM_EVENT_SEND_COMPLETE: {
+                auto* buffer = static_cast<char *>(event->SEND_COMPLETE.ClientContext);
+                self->OnSendComplete(buffer);
+                delete buffer;
+                break;
+            }
+            case QUIC_STREAM_EVENT_RECEIVE:
+                for (int i = 0; i < event->RECEIVE.BufferCount; ++i) {
+                    std::string_view recv_data(
+                        reinterpret_cast<char*>(event->RECEIVE.Buffers[i].Buffer),
+                        event->RECEIVE.Buffers[i].Length
+                    );
+                    self->OnDataReceive(recv_data);
+                }
+                stream->ReceiveComplete(event->RECEIVE.TotalBufferLength);
+                break;
+            case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
+                self->OnPeerShutdown();
+                break;
+            default: break;
+        }
+
+        return QUIC_STATUS_SUCCESS;
+    }
+} // P2P

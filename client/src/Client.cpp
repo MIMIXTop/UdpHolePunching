@@ -1,7 +1,3 @@
-//
-// Created by mimixtop on 14.06.2026.
-//
-
 #include "Client.hpp"
 #include "MakeStunRequest.hpp"
 
@@ -16,6 +12,36 @@
 #include <cstring>
 #include <limits>
 
+namespace {
+    std::string makeStrAddress(uint32_t target) {
+        std::array<uint8_t, 4> address_bytes;
+        std::memcpy(&address_bytes[0], &target, sizeof(target));
+        return std::format("{}.{}.{}.{}", address_bytes[0], address_bytes[1], address_bytes[2], address_bytes[3]);
+    }
+
+    std::array<uint8_t, 26> makePunchRequest(const Network::StunMessage::Type role, const uint16_t port,const uint32_t address) {
+        std::array<uint8_t, 26> request;
+
+        auto t = std::byteswap(static_cast<uint16_t>(role));
+        std::memcpy(&request[0], &role, sizeof(role));
+        uint16_t len = sizeof(port) + sizeof(address);
+        std::memcpy(&request[2], &len, sizeof(len));
+        uint32_t cookie = 0x2112A442;
+        std::memcpy(&request[4], &cookie, sizeof(cookie));
+        auto vec = Network::make_transaction_identifier();
+        std::ranges::copy(vec, request.begin() + 8);
+        std::array<uint8_t, 6> attr;
+
+        uint16_t temp_port = std::byteswap(port);
+        std::memcpy(&attr[0], &temp_port, sizeof(temp_port));
+        uint32_t temp_address = std::byteswap(address);
+        std::memcpy(&attr[2], &temp_address, sizeof(temp_address));
+
+        std::ranges::copy(attr, request.begin() + 20);
+        return request;
+    }
+}
+
 
 namespace Network {
     namespace asio = boost::asio;
@@ -27,6 +53,7 @@ namespace Network {
           serverEndpoint_(*resolver_.resolve(udp::v4(), host, port).begin()),
           socket_(io), userName_(userName) {
         socket_.open(udp::v4());
+        socket_.set_option(asio::socket_base::reuse_address(true));
         socket_.bind(udp::endpoint(udp::v4(), 0));
 
         asio::co_spawn(io, listener(), asio::detached);
@@ -34,6 +61,24 @@ namespace Network {
         menuThread_ = std::jthread([this] {
             menuLoop();
         });
+
+        api_ = new MsQuicApi();
+        reg_ = new MsQuicRegistration("App", QUIC_EXECUTION_PROFILE_LOW_LATENCY, true);
+
+        MsQuicSettings settings;
+        MsQuicCredentialConfig credential_config;
+        credential_config.Type = QUIC_CREDENTIAL_TYPE_NONE;
+        credential_config.Flags = QUIC_CREDENTIAL_FLAG_CLIENT
+        | QUIC_CREDENTIAL_FLAG_INDICATE_CERTIFICATE_RECEIVED
+        | QUIC_CREDENTIAL_FLAG_NO_CERTIFICATE_VALIDATION;
+
+        config_ = new MsQuicConfiguration(reg_, MsQuicAlpn("p2p-node"), settings, credential_config);
+    }
+
+    Client::~Client() {
+        delete config_;
+        delete reg_;
+        delete api_;
     }
 
     asio::awaitable<void> Client::listener() {
@@ -173,12 +218,82 @@ namespace Network {
                     std::println("Host name: {}", item.clientName);
                     std::println("Host port is {}", item.port);
                     std::println("Host address: {}", address);
-                }
+                },
+                [this](Type::Response::ClientPunch item) {
+                    startConnection(item.port, item.address, StunMessage::Type::ClientPunch);
+
+                    std::string line;
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+                    std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
+
+                    while (std::getline(std::cin, line)) {
+                        if (!line.empty()) {
+                            connection_->SendMessage(line);
+                        }
+                        std::print(">");
+                    }
+                },
+                [this](Type::Response::ServerPunch item) {
+                    startConnection(item.port, item.address, StunMessage::Type::ServerPunch);
+                },
             },
             response->attribute
             );
         startPrint_ = true;
         cv_.notify_one();
+    }
+
+    asio::awaitable<void> Client::initP2PConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role) {
+        auto address = makeStrAddress(connectedTarget);
+        udp::endpoint friend_endpoint { asio::ip::make_address(address), connectedPort};
+
+        auto punchMessage = makePunchRequest(role, socket_.local_endpoint().port(), socket_.local_endpoint().address().to_v4().to_uint());
+        std::println("Start connect to {}:{}", connectedTarget, connectedPort);
+
+        co_await socket_.async_send_to(
+            asio::buffer(punchMessage),
+            friend_endpoint,
+            asio::use_awaitable
+        );
+    }
+
+    void Client::startConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role) {
+        uint16_t localPort = socket_.local_endpoint().port();
+
+        QuicAddr localAddress{QUIC_ADDRESS_FAMILY_INET, localPort};
+
+
+        switch (role) {
+            case StunMessage::Type::ClientPunch: { // server fn
+                auto listen = [](MsQuicListener* ls, void* context, QUIC_LISTENER_EVENT* event) -> QUIC_STATUS {
+                    if (event->Type == QUIC_LISTENER_EVENT_NEW_CONNECTION) {
+                        auto* self = static_cast<Client*>(context);
+
+                        self->connection_ = std::make_unique<P2P::Connection>(event->NEW_CONNECTION.Connection);
+                    }
+
+                    return QUIC_STATUS_SUCCESS;
+                };
+
+                listener_ = std::make_unique<MsQuicListener>(reg_, CleanUpAutoDelete, listen, this);
+                listener_->Start(MsQuicAlpn("P2P_Client"), &localAddress.SockAddr);
+                break;
+            }
+            case StunMessage::Type::ServerPunch: { // client fn
+                connection_ = std::make_unique<P2P::Connection>(*reg_);
+                connection_->get_connection().SetLocalAddr(QuicAddr{localAddress});
+                connection_->get_connection().Start(*config_, makeStrAddress(connectedTarget).c_str(), connectedPort);
+                break;
+            }
+            default:
+                throw std::runtime_error("Unknown role");
+        }
+    }
+
+    QUIC_API QUIC_STATUS Client::callback(MsQuicListener *ls, void *context, QUIC_LISTENER_EVENT) {
+
+        return QUIC_STATUS_SUCCESS;
     }
 
     void Client::bindingRequest() {

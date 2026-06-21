@@ -54,6 +54,16 @@ namespace Network::Type {
             std::string error;
         };
 
-        using Attribute = std::variant<BindingResponse, GetConnectedListResponse, ErrorResponse, ConnectToClientResponse, ConnectToHostResponse>;
+        struct ServerPunch {
+            uint32_t address;
+            uint16_t port;
+        };
+
+        struct ClientPunch {
+            uint32_t address;
+            uint16_t port;
+        };
+
+        using Attribute = std::variant<BindingResponse, GetConnectedListResponse, ErrorResponse, ConnectToClientResponse, ConnectToHostResponse, ServerPunch, ClientPunch>;
     }
 }

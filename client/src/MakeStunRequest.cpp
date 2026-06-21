@@ -4,7 +4,7 @@
 #include <cstring>
 
 std::array<uint8_t, 12> Network::make_transaction_identifier() {
-    std::array<uint8_t, 12> identifier{0};
+    std::array<uint8_t, 12> identifier{};
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -140,6 +140,33 @@ Network::StunMessage::StunMessageResponse Network::parseRawMessage(std::span<uin
                 .error = err
             };
 
+            break;
+        }
+        case StunMessage::Type::ServerPunch: {
+            uint16_t port = 0;
+            uint32_t address = 0;
+            std::memcpy(&port, &attr[0], sizeof(port));
+            std::memcpy(&address, &attr[2], sizeof(address));
+            port = std::byteswap(port);
+
+            response.attribute = Type::Response::ServerPunch {
+                .address = address,
+                .port = port
+            };
+
+            break;
+        }
+        case StunMessage::Type::ClientPunch: {
+            uint16_t port = 0;
+            uint32_t address = 0;
+            std::memcpy(&port, &attr[0], sizeof(port));
+            std::memcpy(&address, &attr[2], sizeof(address));
+            port = std::byteswap(port);
+
+            response.attribute = Type::Response::ClientPunch {
+                .address = address,
+                .port = port
+            };
             break;
         }
         default:
