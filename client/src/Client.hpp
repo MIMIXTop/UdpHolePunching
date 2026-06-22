@@ -2,10 +2,12 @@
 #include "Connection.hpp"
 #include "Types/Type.hpp"
 #include "MakeStunRequest.hpp"
+#include "Util/AppState.hpp"
 
 #include <boost/asio.hpp>
 #include <string_view>
 #include <thread>
+#include <atomic>
 
 
 namespace Network {
@@ -44,6 +46,7 @@ namespace Network {
         std::condition_variable cv_;
         std::mutex mutex_;
         std::jthread menuThread_;
+        std::atomic<AppState> appState_{AppState::Menu};
 
         MsQuicRegistration *reg_;
         MsQuicConfiguration *config_;

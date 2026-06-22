@@ -19,7 +19,7 @@ int main() {
 
     asio::io_context context{8};
 
-    Network::Client client(context, "127.0.0.1", "12345", "UserA");
+    Network::Client client(context, "192.168.1.9", "12345", "UserA");
 
     //Network::Client client(context, "192.168.1.9" , "12345", "UserB");
 

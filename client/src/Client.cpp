@@ -4,7 +4,7 @@
 #include <iostream>
 #include <print>
 
-#include "../../server/src/util/Match.hpp"
+#include "Util/Match.hpp"
 
 #include <algorithm>
 #include <array>
@@ -113,8 +113,9 @@ namespace Network {
                 std::println("Recv bytes: {}", bytes);
 
                 auto response = std::make_unique<StunMessage::StunMessageResponse>(parseRawMessage(recv_buffer));
-
+                std::println("Message type: {}", static_cast<uint16_t>(response->header.message_type));
                 dispatchResponse(std::move(response));
+                std::println("2Recv bytes: {}", bytes);
             }
         } catch (const std::exception &e) {
             std::println(std::cerr, "Client listener error: {}", e.what());
@@ -165,7 +166,28 @@ namespace Network {
     }
 
     void Client::menuLoop() {
+
         for (;;) {
+
+            if (appState_ == AppState::Chat) {
+
+                std::println("<Chat>");
+
+                std::string line;
+                std::cin.clear();
+                while (appState_ == AppState::Chat) {
+                    if (std::getline(std::cin, line)) {
+                        if (line == "EXIT") {
+                            appState_ = AppState::Menu;
+                        }
+                        if (connection_) {
+                            connection_->SendMessage(line);
+                        }
+                    }
+                }
+
+                continue;
+            }
             int number = 0;
             std::println("1. Connect to server");
             std::println("2. Get a list of users connected to the server");
@@ -187,13 +209,18 @@ namespace Network {
                 }
                 case 3: {
                     std::unique_lock lk(mutex_);
+
                     std::string connectName;
                     std::print("Input connect name: ");
+
                     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
                     std::getline(std::cin, connectName);
+                    startP2P_ = false;
+
                     ConnectToClient(connectName);
+
                     cv_.wait(lk, [this] { return startPrint_; });
-                    cv_.wait(lk, [this] { return !startP2P_; });
                     break;
                 }
                 default:
@@ -201,17 +228,20 @@ namespace Network {
                     break;
             }
             startPrint_ = false;
-            std::print("Tap any button ... ");
-            std::cin.clear();
-            std::cin.get();
-            std::cin.get();
-            system("clear");
+
+            if (appState_ == AppState::Menu) {
+                std::print("Tap any button ... ");
+                std::cin.clear();
+                std::cin.get();
+                std::cin.get();
+                system("clear");
+            }
         }
     }
 
     void Client::dispatchResponse(std::unique_ptr<StunMessage::StunMessageResponse> response) {
         std::visit(
-            util::match{
+            Util::match{
                 [](Type::Response::BindingResponse item) {
                     std::array<uint8_t, 4> address{};
                     std::memcpy(&address[0], &item.address, address.size());
@@ -259,36 +289,24 @@ namespace Network {
                     );
                 },
                 [this](Type::Response::ClientPunch item) {
-                    startConnection(item.port, item.address, StunMessage::Type::ClientPunch);
-
-                    std::string line;
-                    std::this_thread::sleep_for(std::chrono::seconds(2));
-
                     std::println("ClientPunch");
-                    std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
+                    socket_.cancel();
 
-                    while (std::getline(std::cin, line)) {
-                        if (!line.empty()) {
-                            connection_->SendMessage(line);
-                        }
-                        std::print(">");
-                    }
+                    startConnection(item.port, item.address, StunMessage::Type::ClientPunch);
+                    appState_ = AppState::Chat;
+                    startPrint_ = true;
+                    cv_.notify_one();
                 },
                 [this](Type::Response::ServerPunch item) {
-                    startConnection(item.port, item.address, StunMessage::Type::ServerPunch);
-
-                    std::string line;
-                    std::this_thread::sleep_for(std::chrono::seconds(2));
-
                     std::println("ServerPunch");
+                    socket_.cancel();
+
+                    startConnection(item.port, item.address, StunMessage::Type::ServerPunch);
                     std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
 
-                    while (std::getline(std::cin, line)) {
-                        if (!line.empty()) {
-                            connection_->SendMessage(line);
-                        }
-                        std::print(">");
-                    }
+                    appState_ = AppState::Chat;
+                    startPrint_ = true;
+                    cv_.notify_one();
                 },
             },
             response->attribute
@@ -307,6 +325,11 @@ namespace Network {
 
         std::println("Start connect to {}:{}", address, connectedPort);
 
+        co_await socket_.async_send_to(
+            asio::buffer(punchMessage),
+            friend_endpoint,
+            asio::use_awaitable
+        );
         co_await socket_.async_send_to(
             asio::buffer(punchMessage),
             friend_endpoint,
