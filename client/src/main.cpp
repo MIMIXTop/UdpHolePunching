@@ -19,11 +19,16 @@ int main() {
 
     asio::io_context context{8};
 
-    Network::Client client(context, "192.168.1.9", "12345", "UserA");
+    try {
+        Network::Client client(context, "192.168.1.9", "12345", "UserA");
+        context.run();
+    } catch (std::exception &e) {
+        std::cerr << e.what();
+    }
+
 
     //Network::Client client(context, "192.168.1.9" , "12345", "UserB");
 
-    context.run();
     // try {
     //     asio::io_context io;
     //     udp::resolver resolver(io);

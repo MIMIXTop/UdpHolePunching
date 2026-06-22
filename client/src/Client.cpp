@@ -58,7 +58,8 @@ namespace Network {
         : io_(io),
           resolver_(io),
           serverEndpoint_(*resolver_.resolve(udp::v4(), host, port).begin()),
-          socket_(io), userName_(userName) {
+          socket_(io), userName_(userName),
+          workGuard_(asio::make_work_guard(io)) {
         try {
             socket_.open(udp::v4());
             socket_.set_option(asio::socket_base::reuse_address(true));
@@ -93,6 +94,9 @@ namespace Network {
     }
 
     Client::~Client() {
+        connection_.reset();
+        listener_.reset();
+
         delete config_;
         delete reg_;
     }
@@ -101,15 +105,25 @@ namespace Network {
         try {
             std::println("Start listen");
             for (;;) {
-
                 if (appState_ == AppState::Chat) co_return;
                 std::array<uint8_t, 1024> buffer{};
                 udp::endpoint senderEndpoint;
-                const size_t bytes = co_await socket_.async_receive_from(
-                    asio::buffer(buffer),
-                    senderEndpoint,
-                    asio::use_awaitable
-                );
+                size_t bytes = 0;
+                try {
+                    bytes = co_await socket_.async_receive_from(
+                        asio::buffer(buffer),
+                        senderEndpoint,
+                        asio::use_awaitable
+                    );
+                } catch (const boost::system::system_error &e) {
+                    if (e.code() == asio::error::operation_aborted) {
+                        std::println("ASIO listener gracefully stopped for MsQuic handover.");
+                        co_return;
+                    }
+                    std::println(std::cerr, "Real Network Error: {}", e.what());
+                    co_return;
+                }
+
 
                 if (appState_ == AppState::Chat) continue;
 
@@ -171,11 +185,8 @@ namespace Network {
     }
 
     void Client::menuLoop() {
-
         for (;;) {
-
             if (appState_ == AppState::Chat) {
-
                 std::println("<Chat>");
 
                 std::string line;
@@ -273,7 +284,6 @@ namespace Network {
                         initP2PConnection(item.port, item.address, StunMessage::Type::ClientPunch),
                         asio::detached
                     );
-
                 },
                 [](Type::Response::GetConnectedListResponse item) {
                     std::ranges::for_each(item.connectedList, [](auto &item) {
@@ -333,29 +343,25 @@ namespace Network {
 
     asio::awaitable<void> Client::initP2PConnection(uint16_t connectedPort, u_int32_t connectedTarget,
                                                     StunMessage::Type role) {
-        auto address = makeStrAddress(connectedTarget);
-        udp::endpoint friend_endpoint{asio::ip::make_address(address), connectedPort};
+        try {
+            auto address = makeStrAddress(connectedTarget);
+            udp::endpoint friend_endpoint{asio::ip::make_address(address), connectedPort};
+            auto punchMessage = makePunchRequest(role, socket_.local_endpoint().port(),
+                                                 socket_.local_endpoint().address().to_v4().to_uint());
 
-        auto punchMessage = makePunchRequest(role, socket_.local_endpoint().port(),
-                                             socket_.local_endpoint().address().to_v4().to_uint());
+            std::println("Start connect to {}:{}", address, connectedPort);
+            asio::steady_timer timer{io_};
 
-        std::println("Start connect to {}:{}", address, connectedPort);
+            for (int i = 0; i < 10; ++i) {
+                if (appState_ == AppState::Chat) break;
 
-        asio::steady_timer timer{io_};
+                co_await socket_.async_send_to(asio::buffer(punchMessage), friend_endpoint, asio::use_awaitable);
 
-        for (int i = 0; i < 10; ++i) {
-            if (appState_ == AppState::Chat) {
-                break;
+                timer.expires_after(std::chrono::milliseconds(50));
+                co_await timer.async_wait(asio::use_awaitable);
             }
-
-            co_await socket_.async_send_to(
-              asio::buffer(punchMessage),
-              friend_endpoint,
-              asio::use_awaitable
-            );
-
-            timer.expires_after(std::chrono::milliseconds(50));
-            co_await timer.async_wait(asio::use_awaitable);
+        } catch (const std::exception &e) {
+            std::println("P2P Connection sender stopped: {}", e.what());
         }
     }
 
@@ -379,7 +385,7 @@ namespace Network {
                 };
 
                 listener_ = std::make_unique<MsQuicListener>(reg_, CleanUpAutoDelete, listen, this);
-                listener_->Start(MsQuicAlpn("P2P_Client"), &localAddress.SockAddr);
+                listener_->Start(MsQuicAlpn("p2p-node"), &localAddress.SockAddr);
                 break;
             }
             case StunMessage::Type::ServerPunch: {

@@ -39,6 +39,8 @@ namespace Network {
         udp::resolver resolver_;
         udp::endpoint serverEndpoint_;
         udp::socket socket_;
+        asio::executor_work_guard<asio::io_context::executor_type> workGuard_;
+
         std::string userName_;
         bool serverConnected_ = false;
         bool startP2P_ = false;
