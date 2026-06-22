@@ -101,6 +101,8 @@ namespace Network {
         try {
             std::println("Start listen");
             for (;;) {
+
+                if (appState_ == AppState::Chat) co_return;
                 std::array<uint8_t, 1024> buffer{};
                 udp::endpoint senderEndpoint;
                 const size_t bytes = co_await socket_.async_receive_from(
@@ -108,6 +110,9 @@ namespace Network {
                     senderEndpoint,
                     asio::use_awaitable
                 );
+
+                if (appState_ == AppState::Chat) continue;
+
                 std::vector<uint8_t> recv_buffer(buffer.begin(), buffer.begin() + bytes);
 
                 std::println("Recv bytes: {}", bytes);
@@ -179,6 +184,12 @@ namespace Network {
                     if (std::getline(std::cin, line)) {
                         if (line == "EXIT") {
                             appState_ = AppState::Menu;
+
+                            connection_.reset();
+                            listener_.reset();
+
+                            asio::co_spawn(io_, listener(), asio::detached);
+                            break;
                         }
                         if (connection_) {
                             connection_->SendMessage(line);
@@ -289,22 +300,27 @@ namespace Network {
                     );
                 },
                 [this](Type::Response::ClientPunch item) {
+                    if (appState_ == AppState::Chat) return;
+
                     std::println("ClientPunch");
+                    appState_ = AppState::Chat;
                     socket_.cancel();
 
                     startConnection(item.port, item.address, StunMessage::Type::ClientPunch);
-                    appState_ = AppState::Chat;
                     startPrint_ = true;
                     cv_.notify_one();
                 },
                 [this](Type::Response::ServerPunch item) {
+                    if (appState_ == AppState::Chat) return;
+
                     std::println("ServerPunch");
+                    appState_ = AppState::Chat;
                     socket_.cancel();
 
                     startConnection(item.port, item.address, StunMessage::Type::ServerPunch);
                     std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
 
-                    appState_ = AppState::Chat;
+
                     startPrint_ = true;
                     cv_.notify_one();
                 },
@@ -325,16 +341,22 @@ namespace Network {
 
         std::println("Start connect to {}:{}", address, connectedPort);
 
-        co_await socket_.async_send_to(
-            asio::buffer(punchMessage),
-            friend_endpoint,
-            asio::use_awaitable
-        );
-        co_await socket_.async_send_to(
-            asio::buffer(punchMessage),
-            friend_endpoint,
-            asio::use_awaitable
-        );
+        asio::steady_timer timer{io_};
+
+        for (int i = 0; i < 10; ++i) {
+            if (appState_ == AppState::Chat) {
+                break;
+            }
+
+            co_await socket_.async_send_to(
+              asio::buffer(punchMessage),
+              friend_endpoint,
+              asio::use_awaitable
+            );
+
+            timer.expires_after(std::chrono::milliseconds(50));
+            co_await timer.async_wait(asio::use_awaitable);
+        }
     }
 
     void Client::startConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role) {
