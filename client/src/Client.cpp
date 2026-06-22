@@ -11,15 +11,17 @@
 #include <bit>
 #include <cstring>
 #include <limits>
+#include <exception>
 
 namespace {
     std::string makeStrAddress(uint32_t target) {
-        std::array<uint8_t, 4> address_bytes;
+        std::array<uint8_t, 4> address_bytes{};
         std::memcpy(&address_bytes[0], &target, sizeof(target));
         return std::format("{}.{}.{}.{}", address_bytes[0], address_bytes[1], address_bytes[2], address_bytes[3]);
     }
 
-    std::array<uint8_t, 26> makePunchRequest(const Network::StunMessage::Type role, const uint16_t port,const uint32_t address) {
+    std::array<uint8_t, 26> makePunchRequest(const Network::StunMessage::Type role, const uint16_t port,
+                                             const uint32_t address) {
         std::array<uint8_t, 26> request;
 
         auto t = std::byteswap(static_cast<uint16_t>(role));
@@ -52,39 +54,49 @@ namespace Network {
           resolver_(io),
           serverEndpoint_(*resolver_.resolve(udp::v4(), host, port).begin()),
           socket_(io), userName_(userName) {
-        socket_.open(udp::v4());
-        socket_.set_option(asio::socket_base::reuse_address(true));
-        socket_.bind(udp::endpoint(udp::v4(), 0));
+        try {
+            socket_.open(udp::v4());
+            socket_.set_option(asio::socket_base::reuse_address(true));
+            socket_.bind(udp::endpoint(udp::v4(), 0));
 
-        asio::co_spawn(io, listener(), asio::detached);
+            std::println("Start listener");
+            asio::co_spawn(io, listener(), asio::detached);
+            std::println("Continue listener");
+            reg_ = new MsQuicRegistration("App", QUIC_EXECUTION_PROFILE_LOW_LATENCY, true);
 
-        menuThread_ = std::jthread([this] {
-            menuLoop();
-        });
+            MsQuicSettings settings{};
+            MsQuicCredentialConfig credential_config{};
+            credential_config.Type = QUIC_CREDENTIAL_TYPE_NONE;
+            credential_config.Flags = QUIC_CREDENTIAL_FLAG_CLIENT
+                                      | QUIC_CREDENTIAL_FLAG_INDICATE_CERTIFICATE_RECEIVED
+                                      | QUIC_CREDENTIAL_FLAG_NO_CERTIFICATE_VALIDATION;
 
-        api_ = new MsQuicApi();
-        reg_ = new MsQuicRegistration("App", QUIC_EXECUTION_PROFILE_LOW_LATENCY, true);
 
-        MsQuicSettings settings;
-        MsQuicCredentialConfig credential_config;
-        credential_config.Type = QUIC_CREDENTIAL_TYPE_NONE;
-        credential_config.Flags = QUIC_CREDENTIAL_FLAG_CLIENT
-        | QUIC_CREDENTIAL_FLAG_INDICATE_CERTIFICATE_RECEIVED
-        | QUIC_CREDENTIAL_FLAG_NO_CERTIFICATE_VALIDATION;
+            std::println("Start msquic config");
+            config_ = new MsQuicConfiguration(*reg_, MsQuicAlpn("p2p-node"), settings, credential_config);
+            std::println("Init msquic config");
 
-        config_ = new MsQuicConfiguration(reg_, MsQuicAlpn("p2p-node"), settings, credential_config);
+
+            menuThread_ = std::jthread([this] {
+                menuLoop();
+            });
+
+            menuThread_.detach();
+        } catch (const std::exception &err) {
+            std::println("{}", err.what());
+        }
     }
 
     Client::~Client() {
         delete config_;
         delete reg_;
-        delete api_;
     }
 
     asio::awaitable<void> Client::listener() {
         try {
-            std::vector<uint8_t> buffer(1024);
+            std::println("Start listen");
             for (;;) {
+                std::array<uint8_t, 1024> buffer{};
                 udp::endpoint senderEndpoint;
                 const size_t bytes = co_await socket_.async_receive_from(
                     asio::buffer(buffer),
@@ -92,11 +104,14 @@ namespace Network {
                     asio::use_awaitable
                 );
                 std::vector<uint8_t> recv_buffer(buffer.begin(), buffer.begin() + bytes);
+
+                std::println("Recv bytes: {}", bytes);
+
                 auto response = std::make_unique<StunMessage::StunMessageResponse>(parseRawMessage(recv_buffer));
 
                 dispatchResponse(std::move(response));
             }
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             std::println(std::cerr, "Client listener error: {}", e.what());
         }
     }
@@ -140,6 +155,7 @@ namespace Network {
     }
 
     asio::awaitable<void> Client::sendMessage(std::vector<uint8_t> message) {
+        std::println("Send message: {}", message);
         co_await socket_.async_send_to(asio::buffer(message), serverEndpoint_, asio::use_awaitable);
     }
 
@@ -155,13 +171,13 @@ namespace Network {
                 case 1: {
                     std::unique_lock lk(mutex_);
                     bindingRequest();
-                    cv_.wait(lk, [this]{return startPrint_;});
+                    cv_.wait(lk, [this] { return startPrint_; });
                     break;
                 }
                 case 2: {
                     std::unique_lock lk(mutex_);
                     getListConnectedUsers();
-                    cv_.wait(lk, [this]{ return startPrint_; });
+                    cv_.wait(lk, [this] { return startPrint_; });
                     break;
                 }
                 case 3: {
@@ -171,7 +187,7 @@ namespace Network {
                     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                     std::getline(std::cin, connectName);
                     ConnectToClient(connectName);
-                    cv_.wait(lk, [this]{ return startPrint_; });
+                    cv_.wait(lk, [this] { return startPrint_; });
                     break;
                 }
                 default:
@@ -204,7 +220,7 @@ namespace Network {
                     std::println("Client name connected: {}", item.clientName);
                 },
                 [](Type::Response::GetConnectedListResponse item) {
-                    std::ranges::for_each(item.connectedList, [](auto& item) {
+                    std::ranges::for_each(item.connectedList, [](auto &item) {
                         std::println("Connected client name: {}", item);
                     });
                 },
@@ -239,16 +255,18 @@ namespace Network {
                 },
             },
             response->attribute
-            );
+        );
         startPrint_ = true;
         cv_.notify_one();
     }
 
-    asio::awaitable<void> Client::initP2PConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role) {
+    asio::awaitable<void> Client::initP2PConnection(uint16_t connectedPort, u_int32_t connectedTarget,
+                                                    StunMessage::Type role) {
         auto address = makeStrAddress(connectedTarget);
-        udp::endpoint friend_endpoint { asio::ip::make_address(address), connectedPort};
+        udp::endpoint friend_endpoint{asio::ip::make_address(address), connectedPort};
 
-        auto punchMessage = makePunchRequest(role, socket_.local_endpoint().port(), socket_.local_endpoint().address().to_v4().to_uint());
+        auto punchMessage = makePunchRequest(role, socket_.local_endpoint().port(),
+                                             socket_.local_endpoint().address().to_v4().to_uint());
         std::println("Start connect to {}:{}", connectedTarget, connectedPort);
 
         co_await socket_.async_send_to(
@@ -265,10 +283,11 @@ namespace Network {
 
 
         switch (role) {
-            case StunMessage::Type::ClientPunch: { // server fn
-                auto listen = [](MsQuicListener* ls, void* context, QUIC_LISTENER_EVENT* event) -> QUIC_STATUS {
+            case StunMessage::Type::ClientPunch: {
+                // server fn
+                auto listen = [](MsQuicListener *ls, void *context, QUIC_LISTENER_EVENT *event) -> QUIC_STATUS {
                     if (event->Type == QUIC_LISTENER_EVENT_NEW_CONNECTION) {
-                        auto* self = static_cast<Client*>(context);
+                        auto *self = static_cast<Client *>(context);
 
                         self->connection_ = std::make_unique<P2P::Connection>(event->NEW_CONNECTION.Connection);
                     }
@@ -280,7 +299,8 @@ namespace Network {
                 listener_->Start(MsQuicAlpn("P2P_Client"), &localAddress.SockAddr);
                 break;
             }
-            case StunMessage::Type::ServerPunch: { // client fn
+            case StunMessage::Type::ServerPunch: {
+                // client fn
                 connection_ = std::make_unique<P2P::Connection>(*reg_);
                 connection_->get_connection().SetLocalAddr(QuicAddr{localAddress});
                 connection_->get_connection().Start(*config_, makeStrAddress(connectedTarget).c_str(), connectedPort);
@@ -289,11 +309,6 @@ namespace Network {
             default:
                 throw std::runtime_error("Unknown role");
         }
-    }
-
-    QUIC_API QUIC_STATUS Client::callback(MsQuicListener *ls, void *context, QUIC_LISTENER_EVENT) {
-
-        return QUIC_STATUS_SUCCESS;
     }
 
     void Client::bindingRequest() {

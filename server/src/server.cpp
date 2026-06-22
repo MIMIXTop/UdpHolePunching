@@ -27,7 +27,7 @@ namespace Network {
 
     asio::awaitable<void> Server::listen() {
         auto executor = co_await asio::this_coro::executor;
-        std::array<uint8_t, 1024> buffer;
+        std::array<uint8_t, 1024> buffer{};
         for (;;) {
             udp::endpoint client_endpoint;
             size_t bytes = co_await socket_.async_receive_from(
@@ -35,6 +35,8 @@ namespace Network {
                 client_endpoint,
                 asio::use_awaitable
             );
+
+            std::println("Recv bytes: {}", bytes );
 
             std::vector<uint8_t> recv_buffer(buffer.begin(), buffer.begin() + bytes);
 

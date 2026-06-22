@@ -11,8 +11,6 @@ add_executable(udp_client src/main.cpp
         src/Client.cpp
         src/Client.hpp
         src/Types/Type.hpp
-        src/P2PSession.cpp
-        src/P2PSession.hpp
         src/Stream.cpp
         src/Stream.hpp
         src/Connection.cpp

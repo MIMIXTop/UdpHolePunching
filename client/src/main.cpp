@@ -3,14 +3,19 @@
 #include "Client.hpp"
 
 #include <iostream>
-#include <vector>
-#include <array>
-#include <bit>
+#include <print>
 #include <boost/asio.hpp>
+
+const MsQuicApi* MsQuic = new MsQuicApi();
 
 int main() {
     namespace asio = boost::asio;
     using udp = asio::ip::udp;
+
+    if (QUIC_FAILED(MsQuic->GetInitStatus())) {
+        std::println("FATAL ERROR: Failed to initialize MsQuic!");
+        return -1;
+    }
 
     asio::io_context context{8};
 

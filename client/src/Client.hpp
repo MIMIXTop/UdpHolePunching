@@ -32,8 +32,6 @@ namespace Network {
     private:
         void startConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role);
 
-        static QUIC_API QUIC_STATUS callback(MsQuicListener* ls, void* context, QUIC_LISTENER_EVENT);
-
         std::vector<Type::ConnectionUser> connectionList_;
         asio::io_context& io_;
         udp::resolver resolver_;
@@ -46,7 +44,6 @@ namespace Network {
         std::mutex mutex_;
         std::jthread menuThread_;
 
-        const MsQuicApi *api_;
         MsQuicRegistration *reg_;
         MsQuicConfiguration *config_;
 
