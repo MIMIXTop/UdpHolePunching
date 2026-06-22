@@ -340,11 +340,13 @@ namespace Network {
         response.header.message_type = StunMessage::Type::ConnectToHost;
         response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t) + host.name.size();
         response.header.cookie = 0x2112A442;
-        response.header.tx_id =  StunMessage::make_transaction_identifier(); //StunMessage::make_transaction_identifier();
+        response.header.tx_id =  StunMessage::make_transaction_identifier();
+
+        auto addr = std::byteswap(client.endpoint->address().to_v4().to_uint());;
 
         response.attribute = Type::Response::ConnectToClientResponse{
             .clientName = host.name,
-            .address = client.endpoint->address().to_v4().to_uint(),
+            .address = addr,
             .port = client.endpoint->port()
         };
 

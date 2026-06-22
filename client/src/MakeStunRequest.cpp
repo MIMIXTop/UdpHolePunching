@@ -2,6 +2,7 @@
 #include <random>
 #include <netinet/in.h>
 #include <cstring>
+#include <stdexcept>
 
 std::array<uint8_t, 12> Network::make_transaction_identifier() {
     std::array<uint8_t, 12> identifier{};
