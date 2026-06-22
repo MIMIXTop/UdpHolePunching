@@ -1,12 +1,15 @@
 #include "Connection.hpp"
 #include "Stream.hpp"
 #include <iostream>
+#include <print>
 
 namespace P2P {
-    Connection::Connection(MsQuicRegistration& ms_reg) : connection_(ms_reg, CleanUpAutoDelete, Callback, this) {
+    Connection::Connection(MsQuicRegistration& ms_reg) : connection_(ms_reg, CleanUpManual, Callback, this) {
+        std::println("Create connection C++ api");
     }
 
-    Connection::Connection(HQUIC connection) : connection_(connection, CleanUpAutoDelete, Callback, this) {
+    Connection::Connection(HQUIC connection) : connection_(connection, CleanUpManual, Callback, this) {
+        std::println("Create connection native api");
     }
 
     void Connection::OnConnected() {

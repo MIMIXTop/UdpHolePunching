@@ -202,8 +202,11 @@ namespace Network {
                             asio::co_spawn(io_, listener(), asio::detached);
                             break;
                         }
-                        if (connection_) {
-                            connection_->SendMessage(line);
+                        {
+                            std::lock_guard lk(mutex_);
+                            if (connection_) {
+                                connection_->SendMessage(line);
+                            }
                         }
                     }
                 }
@@ -317,7 +320,11 @@ namespace Network {
                     socket_.cancel();
 
                     startConnection(item.port, item.address, StunMessage::Type::ClientPunch);
-                    startPrint_ = true;
+                    std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
+                    {
+                        std::unique_lock lk{mutex_};
+                        startPrint_ = true;
+                    }
                     cv_.notify_one();
                 },
                 [this](Type::Response::ServerPunch item) {
@@ -330,8 +337,10 @@ namespace Network {
                     startConnection(item.port, item.address, StunMessage::Type::ServerPunch);
                     std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
 
-
-                    startPrint_ = true;
+                    {
+                        std::unique_lock lk{mutex_};
+                        startPrint_ = true;
+                    }
                     cv_.notify_one();
                 },
             },
@@ -379,6 +388,7 @@ namespace Network {
                         auto *self = static_cast<Client *>(context);
 
                         self->connection_ = std::make_unique<P2P::Connection>(event->NEW_CONNECTION.Connection);
+                        self->connection_->get_connection().SetConfiguration(*self->config_);
                     }
 
                     return QUIC_STATUS_SUCCESS;

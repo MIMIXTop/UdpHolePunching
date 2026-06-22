@@ -7,15 +7,17 @@
 #include <memory>
 #include <string>
 #include <iostream>
+#include <print>
 
 
 namespace P2P {
     Stream::Stream(const MsQuicConnection &conn) :
-     stream_(conn, QUIC_STREAM_OPEN_FLAG_NONE, CleanUpAutoDelete, CallbackHandle, this) {
+     stream_(conn, QUIC_STREAM_OPEN_FLAG_NONE, CleanUpManual, CallbackHandle, this) {
         stream_.Start();
     }
 
-    Stream::Stream(HQUIC native_stream) : stream_(native_stream, CleanUpAutoDelete, CallbackHandle, this) {
+    Stream::Stream(HQUIC native_stream) : stream_(native_stream, CleanUpManual, CallbackHandle, this) {
+        std::println("Create stream");
     }
 
     void Stream::OnDataReceive(std::string_view data) {
@@ -34,7 +36,7 @@ namespace P2P {
         buffer->Buffer = reinterpret_cast<uint8_t *>(data.data());
         buffer->Length = data.size();
 
-        stream_.Send(buffer, 1, QUIC_SEND_FLAG_FIN);
+        stream_.Send(buffer, 1, QUIC_SEND_FLAG_FIN, buffer);
     }
 
     QUIC_STATUS QUIC_API Stream::CallbackHandle(MsQuicStream* stream, void *context, QUIC_STREAM_EVENT *event) {
