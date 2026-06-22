@@ -24,11 +24,16 @@ namespace {
                                              const uint32_t address) {
         std::array<uint8_t, 26> request;
 
-        auto t = std::byteswap(static_cast<uint16_t>(role));
-        std::memcpy(&request[0], &role, sizeof(role));
+        uint16_t type = static_cast<uint16_t>(role);
         uint16_t len = sizeof(port) + sizeof(address);
-        std::memcpy(&request[2], &len, sizeof(len));
         uint32_t cookie = 0x2112A442;
+        type = std::byteswap(type);
+        len = std::byteswap(len);
+        cookie = std::byteswap(cookie);
+
+
+        std::memcpy(&request[0], &type, sizeof(role));
+        std::memcpy(&request[2], &len, sizeof(len));
         std::memcpy(&request[4], &cookie, sizeof(cookie));
         auto vec = Network::make_transaction_identifier();
         std::ranges::copy(vec, request.begin() + 8);
