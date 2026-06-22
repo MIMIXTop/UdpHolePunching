@@ -193,6 +193,7 @@ namespace Network {
                     std::getline(std::cin, connectName);
                     ConnectToClient(connectName);
                     cv_.wait(lk, [this] { return startPrint_; });
+                    cv_.wait(lk, [this] { return !startP2P_; });
                     break;
                 }
                 default:
@@ -224,7 +225,7 @@ namespace Network {
                     std::println("Port: {}", item.port);
                     std::println("Client name connected: {}", item.clientName);
 
-
+                    startP2P_ = !startP2P_;
                     asio::co_spawn(
                         io_,
                         initP2PConnection(item.port, item.address, StunMessage::Type::ClientPunch),
@@ -247,7 +248,7 @@ namespace Network {
                     std::println("Host name: {}", item.clientName);
                     std::println("Host port is {}", item.port);
                     std::println("Host address: {}", address);
-
+                    startP2P_ = !startP2P_;
                     asio::co_spawn(
                         io_,
                         initP2PConnection(item.port, item.address, StunMessage::Type::ServerPunch),
@@ -260,6 +261,7 @@ namespace Network {
                     std::string line;
                     std::this_thread::sleep_for(std::chrono::seconds(2));
 
+                    std::println("ClientPunch");
                     std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
 
                     while (std::getline(std::cin, line)) {
@@ -271,6 +273,19 @@ namespace Network {
                 },
                 [this](Type::Response::ServerPunch item) {
                     startConnection(item.port, item.address, StunMessage::Type::ServerPunch);
+
+                    std::string line;
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+                    std::println("ClientPunch");
+                    std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
+
+                    while (std::getline(std::cin, line)) {
+                        if (!line.empty()) {
+                            connection_->SendMessage(line);
+                        }
+                        std::print(">");
+                    }
                 },
             },
             response->attribute

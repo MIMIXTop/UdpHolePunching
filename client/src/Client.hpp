@@ -39,6 +39,7 @@ namespace Network {
         udp::socket socket_;
         std::string userName_;
         bool serverConnected_ = false;
+        bool startP2P_ = false;
         bool startPrint_ = false;
         std::condition_variable cv_;
         std::mutex mutex_;
