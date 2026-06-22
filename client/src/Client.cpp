@@ -212,12 +212,20 @@ namespace Network {
                     std::println("Address: {}", address);
                     std::println("Port: {}", item.port);
                 },
-                [](Type::Response::ConnectToClientResponse item) {
+                [&](Type::Response::ConnectToClientResponse item) {
                     std::array<uint8_t, 4> address{};
                     std::memcpy(&address[0], &item.address, address.size());
                     std::println("Address: {}", address);
                     std::println("Port: {}", item.port);
                     std::println("Client name connected: {}", item.clientName);
+
+
+                    asio::co_spawn(
+                        io_,
+                        initP2PConnection(item.port, item.address, StunMessage::Type::ClientPunch),
+                        asio::detached
+                    );
+
                 },
                 [](Type::Response::GetConnectedListResponse item) {
                     std::ranges::for_each(item.connectedList, [](auto &item) {
@@ -227,13 +235,19 @@ namespace Network {
                 [](Type::Response::ErrorResponse item) {
                     std::println("Error: {}", item.error);
                 },
-                [](Type::Response::ConnectToHostResponse item) {
+                [&](Type::Response::ConnectToHostResponse item) {
                     std::array<uint8_t, 4> address{};
                     std::memcpy(&address[0], &item.address, address.size());
 
                     std::println("Host name: {}", item.clientName);
                     std::println("Host port is {}", item.port);
                     std::println("Host address: {}", address);
+
+                    asio::co_spawn(
+                        io_,
+                        initP2PConnection(item.port, item.address, StunMessage::Type::ServerPunch),
+                        asio::detached
+                    );
                 },
                 [this](Type::Response::ClientPunch item) {
                     startConnection(item.port, item.address, StunMessage::Type::ClientPunch);
