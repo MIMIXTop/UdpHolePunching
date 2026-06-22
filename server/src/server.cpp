@@ -342,12 +342,12 @@ namespace Network {
         response.header.cookie = 0x2112A442;
         response.header.tx_id =  StunMessage::make_transaction_identifier();
 
-        auto addr = std::byteswap(client.endpoint->address().to_v4().to_uint());;
+        auto addr = std::byteswap(host.endpoint->address().to_v4().to_uint());;
 
         response.attribute = Type::Response::ConnectToClientResponse{
             .clientName = host.name,
             .address = addr,
-            .port = client.endpoint->port()
+            .port = host.endpoint->port()
         };
 
         auto raw = parseStunMessageToRaw(response);

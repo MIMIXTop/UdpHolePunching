@@ -224,6 +224,7 @@ namespace Network {
                     std::println("Address: {}", address);
                     std::println("Port: {}", item.port);
                     std::println("Client name connected: {}", item.clientName);
+                    std::println("ConnectToClientResponse");
 
                     startP2P_ = !startP2P_;
                     asio::co_spawn(
@@ -248,6 +249,8 @@ namespace Network {
                     std::println("Host name: {}", item.clientName);
                     std::println("Host port is {}", item.port);
                     std::println("Host address: {}", address);
+                    std::println("ConnectToHostResponse");
+
                     startP2P_ = !startP2P_;
                     asio::co_spawn(
                         io_,
@@ -277,7 +280,7 @@ namespace Network {
                     std::string line;
                     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-                    std::println("ClientPunch");
+                    std::println("ServerPunch");
                     std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
 
                     while (std::getline(std::cin, line)) {
@@ -301,7 +304,8 @@ namespace Network {
 
         auto punchMessage = makePunchRequest(role, socket_.local_endpoint().port(),
                                              socket_.local_endpoint().address().to_v4().to_uint());
-        std::println("Start connect to {}:{}", connectedTarget, connectedPort);
+
+        std::println("Start connect to {}:{}", address, connectedPort);
 
         co_await socket_.async_send_to(
             asio::buffer(punchMessage),
