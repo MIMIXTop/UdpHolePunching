@@ -26,7 +26,7 @@ namespace Network {
         asio::awaitable<void> sendMessage(std::vector<uint8_t> message);
         void menuLoop();
 
-        void dispatchResponse(std::unique_ptr<StunMessage::StunMessageResponse> response);
+        void dispatchResponse(std::unique_ptr<StunMessage::StunMessageResponse> response, const udp::endpoint& endpoint);
         asio::any_io_executor get_executor();
 
         asio::awaitable<void> initP2PConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role);
@@ -40,6 +40,7 @@ namespace Network {
         udp::endpoint serverEndpoint_;
         udp::socket socket_;
         asio::executor_work_guard<asio::io_context::executor_type> workGuard_;
+        uint16_t localPort_ = 0;
 
         std::string userName_;
         bool serverConnected_ = false;
@@ -51,7 +52,8 @@ namespace Network {
         std::atomic<AppState> appState_{AppState::Menu};
 
         MsQuicRegistration *reg_;
-        MsQuicConfiguration *config_;
+        MsQuicConfiguration *server_config_;
+        MsQuicConfiguration *client_config_;
 
         std::unique_ptr<MsQuicListener> listener_;
         std::unique_ptr<P2P::Connection> connection_;

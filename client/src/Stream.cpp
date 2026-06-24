@@ -4,6 +4,7 @@
 
 #include "Stream.hpp"
 
+#include <cstring>
 #include <memory>
 #include <string>
 #include <iostream>
@@ -13,11 +14,13 @@
 namespace P2P {
     Stream::Stream(const MsQuicConnection &conn) :
      stream_(conn, QUIC_STREAM_OPEN_FLAG_NONE, CleanUpManual, CallbackHandle, this) {
+        std::println("Create stream native");
         stream_.Start();
     }
 
     Stream::Stream(HQUIC native_stream) : stream_(native_stream, CleanUpManual, CallbackHandle, this) {
-        std::println("Create stream");
+        std::println("Create stream native");
+        stream_.Start();
     }
 
     void Stream::OnDataReceive(std::string_view data) {
@@ -29,14 +32,17 @@ namespace P2P {
     }
 
     void Stream::OnPeerShutdown() {
+        std::println("Peer Shutdown 'stream'");
     }
 
     void Stream::Send(std::string& data, void *context) {
         auto* buffer = new QUIC_BUFFER();
-        buffer->Buffer = reinterpret_cast<uint8_t *>(data.data());
-        buffer->Length = data.size();
 
-        stream_.Send(buffer, 1, QUIC_SEND_FLAG_FIN, buffer);
+        buffer->Length = data.size();
+        buffer->Buffer = new uint8_t[data.size()];
+        std::memcpy(buffer->Buffer, data.data(), data.size());
+
+        stream_.Send(buffer, 1, QUIC_SEND_FLAG_NONE, buffer);
     }
 
     QUIC_STATUS QUIC_API Stream::CallbackHandle(MsQuicStream* stream, void *context, QUIC_STREAM_EVENT *event) {
@@ -45,8 +51,9 @@ namespace P2P {
 
         switch (event->Type) {
             case QUIC_STREAM_EVENT_SEND_COMPLETE: {
-                auto* buffer = static_cast<char *>(event->SEND_COMPLETE.ClientContext);
+                auto* buffer = static_cast<QUIC_BUFFER *>(event->SEND_COMPLETE.ClientContext);
                 self->OnSendComplete(buffer);
+                delete[] buffer->Buffer;
                 delete buffer;
                 break;
             }
