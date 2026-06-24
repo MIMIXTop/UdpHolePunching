@@ -48,7 +48,6 @@ namespace P2P {
         switch (event->Type) {
             case QUIC_STREAM_EVENT_SEND_COMPLETE: {
                 auto* buffer = static_cast<QUIC_BUFFER *>(event->SEND_COMPLETE.ClientContext);
-                delete[] buffer->Buffer;
                 delete buffer;
                 break;
             }
@@ -60,7 +59,7 @@ namespace P2P {
                     );
                     self->OnDataReceive(recv_data);
                 }
-                stream->ReceiveComplete(event->RECEIVE.TotalBufferLength);
+                //stream->ReceiveComplete(event->RECEIVE.TotalBufferLength);
                 break;
             case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
                 self->OnPeerShutdown();
