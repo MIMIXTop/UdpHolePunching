@@ -23,7 +23,7 @@ int main() {
 
     std::getline(std::cin, line);
     try {
-        Network::Client client(context, "127.0.0.1", "12345", line);
+        Network::Client client(context, "192.168.1.9", "12345", line);
         context.run();
     } catch (std::exception &e) {
         std::cerr << e.what();

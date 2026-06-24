@@ -74,6 +74,7 @@ namespace Network {
 
             MsQuicSettings client_settings{};
             client_settings.SetMaximumMtu(1280);
+            client_settings.SetPeerBidiStreamCount(100);
             MsQuicCredentialConfig client_credential_config{};
             client_credential_config.Type = QUIC_CREDENTIAL_TYPE_NONE;
             client_credential_config.Flags = QUIC_CREDENTIAL_FLAG_CLIENT
@@ -86,6 +87,7 @@ namespace Network {
 
             MsQuicSettings server_settings {};
             server_settings.SetMaximumMtu(1280);
+            server_settings.SetPeerBidiStreamCount(100);
             MsQuicCredentialConfig server_credential_config{};
 
             static QUIC_CERTIFICATE_FILE cert_file;

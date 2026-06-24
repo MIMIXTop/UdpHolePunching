@@ -7,27 +7,31 @@
 #include <print>
 
 namespace P2P {
-    Connection::Connection(MsQuicRegistration& ms_reg) : connection_(ms_reg, CleanUpManual, Callback, this) {
+    Connection::Connection(MsQuicRegistration& ms_reg) : connection_(ms_reg, CleanUpManual, ClientCallback, this) {
         //connection_.SetShareUdpBinding(true);
-        std::println("Create connection C++ api");
+        std::println("Create Connection [Client mode]");
     }
 
-    Connection::Connection(HQUIC connection) : connection_(connection, CleanUpManual, Callback, this) {
+    Connection::Connection(HQUIC connection) : connection_(connection, CleanUpManual, ServerCallback, this) {
         //connection_.SetShareUdpBinding(true);
-        std::println("Create connection native api");
+        std::println("Create Connection [Server mode]");
     }
 
-    void Connection::OnConnected() {
-        std::cout << "Мы подключились к другу! Можем общаться.\n";
+    void Connection::onClientConnected() {
+        std::println("[Client] Успешно подключились к серверу! Создаем стрим для чата...");
         stream_ = std::make_unique<Stream>(connection_);
     }
 
-    void Connection::OnDisconnected() {
+    void Connection::onServerConnected() {
+        std::println("[Server] Клиент подключился! Ожидаем открытия стрима");
+    }
+
+    void Connection::onDisconnected() {
         std::cout << "Соединение разорвано собеседником.\n";
     }
 
-    void Connection::OnIncomingStream(HQUIC stream) {
-        std::cout << "Друг открыл стрим. Создаем чат-сессию...\n";
+    void Connection::onServerIncomingStream(HQUIC stream) {
+        std::println("Друг открыл стрим. Создаем чат-сессию");
         stream_ = std::make_unique<Stream>(stream);
     }
 
@@ -43,34 +47,59 @@ namespace P2P {
         }
     }
 
-    QUIC_STATUS QUIC_API Connection::Callback(MsQuicConnection *connection, void *context, QUIC_CONNECTION_EVENT* event) {
+    QUIC_STATUS QUIC_API Connection::ClientCallback(MsQuicConnection *connection, void *context, QUIC_CONNECTION_EVENT *event) {
         auto* self = static_cast<Connection*>(context);
         switch (event->Type) {
-            case QUIC_CONNECTION_EVENT_CONNECTED: {
-                self->OnConnected();
-                //std::string message = "Привет, это зашифрованное сообщение по QUIC!";
-                //self->stream_->Send(message);
-                break;
-            }
-            case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED:
-                self->OnIncomingStream(event->PEER_STREAM_STARTED.Stream);
+            case QUIC_CONNECTION_EVENT_CONNECTED:
+                self->onClientConnected();
                 break;
             case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_PEER:
-                std::println("SHUTDOWN_INITIATED_BY_PEER: {}",event->SHUTDOWN_INITIATED_BY_PEER.ErrorCode);
-                self->OnDisconnected();
+                std::println("[Client] SHUTDOWN_INITIATED_BY_PEER: {}", event->SHUTDOWN_INITIATED_BY_PEER.ErrorCode);
+                self->onDisconnected();
                 break;
             case QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE:
-                std::println("[MsQuic] Соединение полностью закрыто.");
+                std::println("[Client MsQuic] Соединение полностью закрыто.");
                 break;
             case QUIC_CONNECTION_EVENT_PEER_CERTIFICATE_RECEIVED:
                 return QUIC_STATUS_SUCCESS;
             case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_TRANSPORT:
                 if (event->SHUTDOWN_INITIATED_BY_TRANSPORT.Status == QUIC_STATUS_CONNECTION_IDLE) {
-                    std::println("Successfully shut down on idle");
+                    std::println("[Client] Закрыто по таймауту (Idle)");
                 } else {
-                    std::println( "[MsQuic] Ошибка рукопожатия (Транспорт): 0x{:x}", event->SHUTDOWN_INITIATED_BY_TRANSPORT.Status);
+                    std::println("[Client MsQuic] Ошибка рукопожатия (Транспорт): 0x{:x}", event->SHUTDOWN_INITIATED_BY_TRANSPORT.Status);
                 }
                 break;
+            default: break;
+        }
+        return QUIC_STATUS_SUCCESS;
+    }
+
+    QUIC_STATUS QUIC_API Connection::ServerCallback(MsQuicConnection *connection, void *context, QUIC_CONNECTION_EVENT *event) {
+        auto* self = static_cast<Connection*>(context);
+        switch (event->Type) {
+            case QUIC_CONNECTION_EVENT_CONNECTED:
+                self->onServerConnected();
+                break;
+            case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED:
+                self->onServerIncomingStream(event->PEER_STREAM_STARTED.Stream);
+                break;
+            case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_PEER:
+                std::println("[Server] SHUTDOWN_INITIATED_BY_PEER: {}", event->SHUTDOWN_INITIATED_BY_PEER.ErrorCode);
+                self->onDisconnected();
+                break;
+            case QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE:
+                std::println("[Server MsQuic] Соединение полностью закрыто.");
+                break;
+            case QUIC_CONNECTION_EVENT_PEER_CERTIFICATE_RECEIVED:
+                return QUIC_STATUS_SUCCESS;
+            case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_TRANSPORT:
+                if (event->SHUTDOWN_INITIATED_BY_TRANSPORT.Status == QUIC_STATUS_CONNECTION_IDLE) {
+                    std::println("[Server] Закрыто по таймауту (Idle)");
+                } else {
+                    std::println("[Server MsQuic] Ошибка (Транспорт): 0x{:x}", event->SHUTDOWN_INITIATED_BY_TRANSPORT.Status);
+                }
+                break;
+            default: break;
         }
         return QUIC_STATUS_SUCCESS;
     }

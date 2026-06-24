@@ -15,7 +15,7 @@ namespace P2P {
     Stream::Stream(const MsQuicConnection &conn) :
      stream_(conn, QUIC_STREAM_OPEN_FLAG_NONE, CleanUpManual, CallbackHandle, this) {
         std::println("Create stream native");
-        stream_.Start();
+        stream_.Start(QUIC_STREAM_START_FLAG_IMMEDIATE);
     }
 
     Stream::Stream(HQUIC native_stream) : stream_(native_stream, CleanUpManual, CallbackHandle, this) {
@@ -25,10 +25,6 @@ namespace P2P {
 
     void Stream::OnDataReceive(std::string_view data) {
         std::cout << "Получено: " << data << "\n";
-    }
-
-    void Stream::OnSendComplete(void *clientContext) {
-        std::cout << "Сообщение успешно доставлено другу.\n";
     }
 
     void Stream::OnPeerShutdown() {
@@ -52,7 +48,6 @@ namespace P2P {
         switch (event->Type) {
             case QUIC_STREAM_EVENT_SEND_COMPLETE: {
                 auto* buffer = static_cast<QUIC_BUFFER *>(event->SEND_COMPLETE.ClientContext);
-                self->OnSendComplete(buffer);
                 delete[] buffer->Buffer;
                 delete buffer;
                 break;

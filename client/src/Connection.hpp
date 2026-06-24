@@ -12,9 +12,10 @@ namespace P2P {
         Connection(HQUIC connection);
         ~Connection() = default;
 
-        void OnConnected();
-        void OnDisconnected();
-        void OnIncomingStream(HQUIC stream);
+        void onClientConnected();
+        void onServerConnected();
+        void onDisconnected();
+        void onServerIncomingStream(HQUIC stream);
 
         MsQuicConnection& get_connection();
 
@@ -22,7 +23,8 @@ namespace P2P {
     private:
         MsQuicConnection connection_;
         std::unique_ptr<Stream> stream_;
-
-        static QUIC_STATUS QUIC_API Callback(MsQuicConnection* connection, void* context, QUIC_CONNECTION_EVENT* event);
+        
+        static QUIC_STATUS QUIC_API ClientCallback(MsQuicConnection* connection, void* context, QUIC_CONNECTION_EVENT* event);
+        static QUIC_STATUS QUIC_API ServerCallback(MsQuicConnection* connection, void* context, QUIC_CONNECTION_EVENT* event);
     };
 } // P2P

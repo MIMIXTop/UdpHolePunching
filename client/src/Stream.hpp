@@ -13,7 +13,6 @@ namespace P2P {
         ~Stream() = default;
 
         void OnDataReceive(std::string_view data);
-        void OnSendComplete(void* clientContext);
         void OnPeerShutdown();
 
         void Send(std::string& data, void* context = nullptr);
