@@ -32,6 +32,11 @@ namespace Network {
         asio::awaitable<void> initP2PConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role);
 
     private:
+        void saveToken(std::string_view token);
+        void loadToken();
+
+        void MakeRequest(Type::Request::Attribute);
+
         void startConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role);
 
         std::vector<Type::ConnectionUser> connectionList_;
@@ -46,6 +51,7 @@ namespace Network {
         bool serverConnected_ = false;
         bool startP2P_ = false;
         bool startPrint_ = false;
+        std::string token_;
         std::condition_variable cv_;
         std::mutex mutex_;
         std::jthread menuThread_;

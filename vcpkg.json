@@ -5,5 +5,14 @@
   }, {
     "name" : "msquic",
     "version>=" : "2.4.8#1"
+  }, {
+    "name" : "cpp-jwt",
+    "version>=" : "1.5.1"
+  }, {
+    "name" : "rapidcsv",
+    "version>=" : "8.99"
+  }, {
+    "name" : "fast-cpp-csv-parser",
+    "version>=" : "2021-01-03#2"
   } ]
 }

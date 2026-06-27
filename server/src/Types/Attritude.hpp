@@ -13,10 +13,11 @@ namespace Network::Type {
         };
 
         struct GetConnectedList {
-
+            std::string jwtToken;
         };
 
         struct ConnectToClientAttribute {
+            std::string jwtToken;
             std::string clientNameToConnect;
         };
 
@@ -32,6 +33,7 @@ namespace Network::Type {
         struct BindingResponse {
             uint16_t port;
             uint32_t address;
+            std::string jwtToken;
         };
         struct ConnectToClientResponse {
             std::string clientName;

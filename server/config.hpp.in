@@ -1,0 +1,2 @@
+#pragma once
+#define CONFIG_FILE_PATH "@CMAKE_SOURCE_DIR@/server/.env"

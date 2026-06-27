@@ -6,6 +6,8 @@
 
 #include "Types/StunMessage.hpp"
 #include "Types/ConnectedClient.hpp"
+#include "util/Config.hpp"
+#include "util/JwtManager.hpp"
 
 namespace Network {
     namespace asio = boost::asio;
@@ -21,7 +23,7 @@ namespace Network {
         asio::awaitable<void> worker(std::span<uint8_t> data, std::shared_ptr<udp::endpoint> endpoint);
 
         StunMessage::StunMessageRequest parseRawMessage(std::span<uint8_t> data);
-        std::vector<uint8_t> parseStunMessageToRaw(const StunMessage::StunMessageResponse& response);
+        std::vector<uint8_t> parseStunMessageToRaw(const StunMessage::StunMessageResponse& response) const;
 
         std::vector<uint8_t> handleBindingRequest(const StunMessage::StunMessageRequest& message, std::shared_ptr<udp::endpoint> client_endpoint);
 
@@ -31,10 +33,15 @@ namespace Network {
 
         asio::awaitable<void> sendConnectMessage(const Type::ConnectedClient& client, const Type::ConnectedClient& host);
 
+        void saveUser(std::string_view peerId, std::string_view address, std::string_view port);
+        void loadUsers();
+
         std::vector<Type::ConnectedClient> connected_clients {};
         int port_;
         udp::socket socket_;
         udp::endpoint endpoint_;
         std::array<char, 1024> buffer_;
+        Util::Config configuration_;
+        Util::JwtManager jwtManager_;
     };
 }

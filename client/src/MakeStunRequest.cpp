@@ -2,6 +2,7 @@
 #include <random>
 #include <netinet/in.h>
 #include <cstring>
+#include <print>
 #include <stdexcept>
 
 std::array<uint8_t, 12> Network::make_transaction_identifier() {
@@ -50,9 +51,15 @@ Network::StunMessage::StunMessageResponse Network::parseRawMessage(std::span<uin
             std::memcpy(&address, &attr[2], sizeof(address));
             port = std::byteswap(port);
 
+            std::string token;
+            std::ranges::copy(attr.begin() + 6, attr.end(), std::back_inserter(token));
+
+            std::println("Jwt token: {}", token);
+
             response.attribute = Type::Response::BindingResponse {
                 .port = port,
-                .address = address
+                .address = address,
+                .jwtToken = token
             };
             break;
         }

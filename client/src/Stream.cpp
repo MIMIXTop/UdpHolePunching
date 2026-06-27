@@ -59,7 +59,6 @@ namespace P2P {
                     );
                     self->OnDataReceive(recv_data);
                 }
-                //stream->ReceiveComplete(event->RECEIVE.TotalBufferLength);
                 break;
             case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
                 self->OnPeerShutdown();

@@ -12,6 +12,7 @@
 #include <cstring>
 #include <limits>
 #include <exception>
+#include <fstream>
 
 namespace {
     std::string makeStrAddress(uint32_t target) {
@@ -30,7 +31,6 @@ namespace {
         type = std::byteswap(type);
         len = std::byteswap(len);
         cookie = std::byteswap(cookie);
-
 
         std::memcpy(&request[0], &type, sizeof(role));
         std::memcpy(&request[2], &len, sizeof(len));
@@ -59,10 +59,10 @@ namespace Network {
           resolver_(io),
           serverEndpoint_(*resolver_.resolve(udp::v4(), host, port).begin()),
           socket_(io), userName_(userName),
-          workGuard_(asio::make_work_guard(io)) {
+          workGuard_(asio::make_work_guard(io)){
         try {
+            loadToken();
             socket_.open(udp::v4());
-           // socket_.set_option(asio::socket_base::reuse_address(true));
             socket_.bind(udp::endpoint(udp::v4(), 0));
 
             localPort_ = socket_.local_endpoint().port();
@@ -73,21 +73,22 @@ namespace Network {
             reg_ = new MsQuicRegistration("App", QUIC_EXECUTION_PROFILE_LOW_LATENCY, true);
 
             MsQuicSettings client_settings{};
-            client_settings.SetMaximumMtu(1280);
             client_settings.SetPeerBidiStreamCount(100);
+            client_settings.SetDisconnectTimeoutMs(1000);
             MsQuicCredentialConfig client_credential_config{};
             client_credential_config.Type = QUIC_CREDENTIAL_TYPE_NONE;
             client_credential_config.Flags = QUIC_CREDENTIAL_FLAG_CLIENT
-                                      | QUIC_CREDENTIAL_FLAG_NO_CERTIFICATE_VALIDATION;
+                                             | QUIC_CREDENTIAL_FLAG_NO_CERTIFICATE_VALIDATION;
 
 
             std::println("Start msquic client config");
-            client_config_ = new MsQuicConfiguration(*reg_, MsQuicAlpn("p2p-node"), client_settings, client_credential_config);
+            client_config_ = new MsQuicConfiguration(*reg_, MsQuicAlpn("p2p-node"), client_settings,
+                                                     client_credential_config);
             std::println("Sertificate file satus: 0x{:x}", client_config_->GetInitStatus());
 
-            MsQuicSettings server_settings {};
-            server_settings.SetMaximumMtu(1280);
+            MsQuicSettings server_settings{};
             server_settings.SetPeerBidiStreamCount(100);
+            server_settings.SetDisconnectTimeoutMs(1000);
             MsQuicCredentialConfig server_credential_config{};
 
             static QUIC_CERTIFICATE_FILE cert_file;
@@ -98,7 +99,8 @@ namespace Network {
             server_credential_config.CertificateFile = &cert_file;
             server_credential_config.Flags = QUIC_CREDENTIAL_FLAG_NONE;
 
-            server_config_ = new MsQuicConfiguration(*reg_, MsQuicAlpn("p2p-node"), server_settings, server_credential_config);
+            server_config_ = new MsQuicConfiguration(*reg_, MsQuicAlpn("p2p-node"), server_settings,
+                                                     server_credential_config);
 
             std::println("Sertificate file satus: 0x{:x}", server_config_->GetInitStatus());
 
@@ -160,44 +162,6 @@ namespace Network {
         }
     }
 
-    void Client::getListConnectedUsers() {
-        std::vector<uint8_t> request(20);
-        uint16_t message_type = 0x0002;
-        uint16_t message_length = 0;
-        uint32_t cookie = 0x2112A442;
-        std::array<uint8_t, 12> tx_id = make_transaction_identifier();
-        message_type = std::byteswap(message_type);
-        std::memcpy(&request[0], &message_type, sizeof(message_type));
-        message_length = std::byteswap(message_length);
-        std::memcpy(&request[2], &message_length, sizeof(message_length));
-        cookie = std::byteswap(cookie);
-        std::memcpy(&request[4], &cookie, sizeof(cookie));
-        std::ranges::copy(tx_id, request.begin() + 8);
-
-        asio::co_spawn(io_, sendMessage(std::move(request)), asio::detached);
-    }
-
-    void Client::ConnectToClient(std::string_view clientName) {
-        std::vector<uint8_t> request(20 + sizeof(uint16_t) + clientName.size());
-        uint16_t message_type = 0x0003;
-        uint16_t message_length = sizeof(uint16_t) + clientName.size();
-        uint32_t cookie = 0x2112A442;
-        std::array<uint8_t, 12> tx_id = make_transaction_identifier();
-        message_type = std::byteswap(message_type);
-        std::memcpy(&request[0], &message_type, sizeof(message_type));
-        message_length = std::byteswap(message_length);
-        std::memcpy(&request[2], &message_length, sizeof(message_length));
-        cookie = std::byteswap(cookie);
-        std::memcpy(&request[4], &cookie, sizeof(cookie));
-        std::ranges::copy(tx_id, request.begin() + 8);
-
-        uint16_t name_size = std::byteswap(static_cast<uint16_t>(clientName.size()));
-        std::memcpy(&request[20], &name_size, sizeof(name_size));
-        std::ranges::copy(clientName, request.begin() + 20 + sizeof(name_size));
-
-        asio::co_spawn(io_, sendMessage(std::move(request)), asio::detached);
-    }
-
     asio::awaitable<void> Client::sendMessage(std::vector<uint8_t> message) {
         std::println("Send message: {}", message);
         co_await socket_.async_send_to(asio::buffer(message), serverEndpoint_, asio::use_awaitable);
@@ -241,13 +205,21 @@ namespace Network {
             switch (number) {
                 case 1: {
                     std::unique_lock lk(mutex_);
-                    bindingRequest();
+                    //bindingRequest();
+                    MakeRequest(
+                        Type::Request::BindingAttribute{
+                            .clientName = userName_
+                        });
+
                     cv_.wait(lk, [this] { return startPrint_; });
                     break;
                 }
                 case 2: {
                     std::unique_lock lk(mutex_);
-                    getListConnectedUsers();
+                    MakeRequest(Type::Request::GetConnectedList{
+                        .jwtToken = token_
+                    });
+
                     cv_.wait(lk, [this] { return startPrint_; });
                     break;
                 }
@@ -262,7 +234,10 @@ namespace Network {
                     std::getline(std::cin, connectName);
                     startP2P_ = false;
 
-                    ConnectToClient(connectName);
+                    MakeRequest(Type::Request::ConnectToClientAttribute{
+                        .clientNameToConnect = connectName,
+                        .jwtToken = token_
+                    });
 
                     cv_.wait(lk, [this] { return startPrint_; });
                     break;
@@ -283,14 +258,17 @@ namespace Network {
         }
     }
 
-    void Client::dispatchResponse(std::unique_ptr<StunMessage::StunMessageResponse> response, const udp::endpoint& endpoint) {
+    void Client::dispatchResponse(std::unique_ptr<StunMessage::StunMessageResponse> response,
+                                  const udp::endpoint &endpoint) {
         std::visit(
             Util::match{
-                [](Type::Response::BindingResponse item) {
+                [this](Type::Response::BindingResponse item) {
                     std::array<uint8_t, 4> address{};
                     std::memcpy(&address[0], &item.address, address.size());
                     std::println("Address: {}", address);
                     std::println("Port: {}", item.port);
+                    token_ = item.jwtToken;
+                    saveToken(token_);
                 },
                 [&](Type::Response::ConnectToClientResponse item) {
                     std::array<uint8_t, 4> address{};
@@ -398,6 +376,74 @@ namespace Network {
         }
     }
 
+    void Client::saveToken(const std::string_view token) {
+        std::ofstream file("/home/mimixtop/Project/UdpHolePunching/client/token.txt");
+        if (file.is_open()){file << token;}
+        file.close();
+    }
+
+    void Client::loadToken() {
+        std::ifstream file("/home/mimixtop/Project/UdpHolePunching/client/token.txt");
+        if (file.is_open()){file >> token_;}
+        file.close();
+    }
+
+    void Client::MakeRequest(Type::Request::Attribute attr) {
+        uint16_t requestType = 0;
+        uint16_t requestSize = 0;
+        uint32_t requestCookie = 0x2112A442;
+        std::array<uint8_t, 12> txId = make_transaction_identifier();
+        std::vector<uint8_t> payload{};
+
+        std::visit(
+            Util::match{
+                [&](Type::Request::BindingAttribute item) {
+                    requestType = static_cast<uint16_t>(StunMessage::Type::BindingRequest);
+                    requestSize = item.clientName.size();
+                    payload.assign(item.clientName.begin(), item.clientName.end());
+                },
+                [&](const Type::Request::ConnectToClientAttribute& item) {
+                    requestType = static_cast<uint16_t>(StunMessage::Type::ConnectToClient);
+                    requestSize = item.clientNameToConnect.size() + 2 + item.jwtToken.size();
+                    payload.resize(requestSize);// Для ConnectToClient парсим: [Длина токена (2 байта)][Токен][Имя собеседника]
+                    uint16_t tokenSize = item.jwtToken.size();
+                    tokenSize = std::byteswap(tokenSize);
+                    std::memcpy(&payload[0], &tokenSize, sizeof(tokenSize));
+                    auto out_it = std::ranges::copy(item.jwtToken, payload.begin() + 2);
+                    std::ranges::copy(item.clientNameToConnect, out_it.out);
+                },
+                [&](Type::Request::GetConnectedList item) {
+                    requestType = static_cast<uint16_t>(StunMessage::Type::GetConnectedList);
+                    requestSize = token_.size();
+                    payload.assign(item.jwtToken.begin(), item.jwtToken.end());
+                },
+            },
+            attr
+        );
+
+        std::vector<uint8_t> request(20 + requestSize);
+
+        requestType = std::byteswap(requestType);
+        requestSize = std::byteswap(requestSize);
+        requestCookie = std::byteswap(requestCookie);
+
+        std::memcpy(request.data(), &requestType, sizeof(requestType));
+        std::memcpy(request.data() + 2, &requestSize, sizeof(requestSize));
+        std::memcpy(request.data() + 4, &requestCookie, sizeof(requestCookie));
+
+        std::ranges::copy(txId, request.begin() + 8);
+
+        if (!payload.empty()) {
+            std::ranges::copy(payload, request.begin() + 20);
+        }
+
+        asio::co_spawn(
+            io_,
+            sendMessage(std::move(request)),
+            asio::detached
+        );
+    }
+
     void Client::startConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role) {
         socket_.close();
         uint16_t localPort = localPort_;
@@ -413,9 +459,12 @@ namespace Network {
                             auto *self = static_cast<Client *>(context);
 
                             self->connection_ = std::make_unique<P2P::Connection>(event->NEW_CONNECTION.Connection);
-                            QUIC_STATUS status = self->connection_->get_connection().SetConfiguration(*self->server_config_);
+                            QUIC_STATUS status = self->connection_->get_connection().SetConfiguration(
+                                *self->server_config_);
                             if (QUIC_FAILED(status)) {
-                                std::println(std::cerr, "[MsQuic Server] Ошибка SetConfiguration для входящего соединения: 0x{:x}", status);
+                                std::println(
+                                    std::cerr,
+                                    "[MsQuic Server] Ошибка SetConfiguration для входящего соединения: 0x{:x}", status);
                             }
                         }
 
@@ -426,7 +475,9 @@ namespace Network {
                     QUIC_STATUS status = listener_->Start(MsQuicAlpn("p2p-node"), &localAddress.SockAddr);
 
                     if (QUIC_FAILED(status)) {
-                        std::println(std::cerr, "[MsQuic Server] Не удалось запустить Listener на порту {}: 0x{:x}", localPort, status);                    }
+                        std::println(std::cerr, "[MsQuic Server] Не удалось запустить Listener на порту {}: 0x{:x}",
+                                     localPort, status);
+                    }
                     break;
                 }
                 case StunMessage::Type::ServerPunch: {
@@ -435,11 +486,13 @@ namespace Network {
                     QUIC_STATUS status_addr = connection_->get_connection().SetLocalAddr(QuicAddr{localAddress});
 
                     if (QUIC_FAILED(status_addr)) {
-                        std::println(std::cerr, "[MsQuic Client] Ошибка SetLocalAddr для локального порта {}: 0x{:x}", localPort, status_addr);
+                        std::println(std::cerr, "[MsQuic Client] Ошибка SetLocalAddr для локального порта {}: 0x{:x}",
+                                     localPort, status_addr);
                     }
 
                     auto target = makeStrAddress(connectedTarget);
-                    QUIC_STATUS status = connection_->get_connection().Start(*client_config_, target.c_str(), connectedPort);
+                    QUIC_STATUS status = connection_->get_connection().Start(
+                        *client_config_, target.c_str(), connectedPort);
 
                     if (QUIC_FAILED(status)) {
                         std::println(std::cerr, "Ошибка запуска MsQuic подключения: 0x{:x}", status);
@@ -451,11 +504,9 @@ namespace Network {
                 default:
                     throw std::runtime_error("Unknown role");
             }
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             std::println("Error: {}", e.what());
         }
-
-
     }
 
     void Client::bindingRequest() {

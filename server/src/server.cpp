@@ -2,12 +2,17 @@
 #include "Types/StunMessage.hpp"
 #include "util/Match.hpp"
 
+#include <fast-cpp-csv-parser/csv.h>
+
 #include <iostream>
 #include <print>
+#include <format>
 #include <ranges>
 #include <algorithm>
 
 namespace {
+    constexpr auto CSV_FILE_PATH = "/home/mimixtop/Project/UdpHolePunching/server/data.csv";
+
     Network::StunMessage::Type bytesToEnumRequest(uint16_t val) {
         switch (static_cast<Network::StunMessage::Type>(val)) {
             case Network::StunMessage::Type::BindingRequest:
@@ -18,10 +23,19 @@ namespace {
                 return Network::StunMessage::Type::Error;
         }
     }
+
+    std::string makeStrAddress(uint32_t target) {
+        std::array<uint8_t, 4> address_bytes{};
+        std::memcpy(&address_bytes[0], &target, sizeof(target));
+        return std::format("{}.{}.{}.{}", address_bytes[0], address_bytes[1], address_bytes[2], address_bytes[3]);
+    }
 }
 
 namespace Network {
-    Server::Server(asio::io_context &io, short port) : port_(port), socket_(io, udp::endpoint(udp::v4(), port_)) {
+    Server::Server(asio::io_context &io, short port) : port_(port), socket_(io, udp::endpoint(udp::v4(), port_)), jwtManager_(configuration_["SECRET"]) {
+
+        loadUsers();
+
         asio::co_spawn(io, listen(), asio::detached);
     }
 
@@ -125,28 +139,32 @@ namespace Network {
                     request.attribute = Type::Request::Error{.error = "Empty body"};
                     break;
                 }
-                uint16_t connectNameSize = 0;
-                std::memcpy(&connectNameSize, &attr[0], sizeof(connectNameSize));
-                connectNameSize = std::byteswap(connectNameSize);
 
-                if (attr.size() < sizeof(connectNameSize) + connectNameSize) {
-                    request.attribute = Type::Request::Error{.error = "Invalid body"};
+                uint16_t tokenSize = 0;
+                std::memcpy(&tokenSize, &attr[0], sizeof(tokenSize));
+                tokenSize = std::byteswap(tokenSize);
+
+                if (attr.size() < sizeof(tokenSize) + tokenSize) {
+                    request.attribute = Type::Request::Error {
+                        .error = "Invalid format"
+                    };
                     break;
                 }
 
-                std::string connect_str(
-                    attr.begin() + sizeof(connectNameSize),
-                    attr.begin() + sizeof(connectNameSize) + connectNameSize
-                );
+                std::string token{attr.begin() + 2, attr.begin() + 2 + tokenSize};
+                std::string connectName{attr.begin() + 2 + tokenSize, attr.end()};
 
                 request.attribute = Type::Request::ConnectToClientAttribute{
-                    .clientNameToConnect = connect_str,
+                    .jwtToken = token,
+                    .clientNameToConnect = connectName
                 };
 
                 break;
             }
             case StunMessage::Type::GetConnectedList:
-                request.attribute = Type::Request::GetConnectedList{};
+                request.attribute = Type::Request::GetConnectedList{
+                    .jwtToken = std::string(attr.begin(), attr.end())
+                };
                 break;
             default:
                 request.attribute = Type::Request::Error{
@@ -158,7 +176,7 @@ namespace Network {
         return request;
     }
 
-    std::vector<uint8_t> Server::parseStunMessageToRaw(const StunMessage::StunMessageResponse &response) {
+    std::vector<uint8_t> Server::parseStunMessageToRaw(const StunMessage::StunMessageResponse &response) const {
         std::array<uint8_t, 20> header_bytes = StunMessage::castHeaderToBytes(response.header);
         std::vector<uint8_t> body_buffer(response.header.message_length);
 
@@ -167,8 +185,12 @@ namespace Network {
                 [&](const Type::Response::BindingResponse &item) {
                     auto temp_port = std::byteswap(item.port);
                     auto temp_address = item.address;
+
+                    body_buffer.resize(6 + item.jwtToken.size());
+
                     std::memcpy(&body_buffer[0], &temp_port, sizeof(temp_port));
                     std::memcpy(&body_buffer[2], &temp_address, sizeof(temp_address));
+                    std::ranges::copy(item.jwtToken, body_buffer.begin() + 6);
                 },
                 [&](const Type::Response::ConnectToClientResponse &item) {
                     auto temp_port = std::byteswap(item.port);
@@ -195,6 +217,8 @@ namespace Network {
                     }
                 },
                 [&](const Type::Response::ErrorResponse &item) {
+                    body_buffer.resize(item.error.size());
+                    std::ranges::copy(item.error, body_buffer.begin());
                 },
             },
             response.attribute
@@ -222,10 +246,33 @@ namespace Network {
 
         if (it == connected_clients.end()) {
             connected_clients.push_back(Type::ConnectedClient{.name = attr.clientName, .endpoint = client_endpoint});
+        } else {
+            it->endpoint = client_endpoint;
         }
 
+        auto tokenObj = jwtManager_.makeToken(attr.clientName);
+
+        if (!tokenObj) {
+            response.header.message_type = StunMessage::Type::Error;
+            response.header.cookie = message.header.cookie;
+            response.header.tx_id = message.header.tx_id;
+            const std::string str{"Internal server error"};
+            response.header.message_length = str.size();
+            response.attribute = Type::Response::ErrorResponse{
+                .error = str
+            };
+
+            return parseStunMessageToRaw(response);
+        }
+
+        saveUser(
+            attr.clientName,
+            client_endpoint->address().to_string(),
+            std::to_string(client_endpoint->port())
+            );
+
         response.header.message_type = StunMessage::Type::SuccessBinding;
-        response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t);
+        response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t) + tokenObj->size();
         response.header.cookie = message.header.cookie;
         response.header.tx_id = message.header.tx_id;
 
@@ -235,8 +282,11 @@ namespace Network {
 
         response.attribute = Type::Response::BindingResponse{
             .port = client_endpoint->port(),
-            .address = client_address
+            .address = client_address,
+            .jwtToken = *tokenObj
         };
+
+        std::println("Jwt token: {}", *tokenObj);
 
         return parseStunMessageToRaw(response);
     }
@@ -244,6 +294,22 @@ namespace Network {
     std::vector<uint8_t> Server::handleGetConnectionList(const StunMessage::StunMessageRequest &message,
                                                          std::shared_ptr<udp::endpoint> client_endpoint) {
         StunMessage::StunMessageResponse response{};
+        auto attr = std::get<Type::Request::GetConnectedList>(message.attribute);
+
+        auto peerId = jwtManager_.verifyJwt(attr.jwtToken);
+
+        if (!peerId) {
+            response.header.message_type = StunMessage::Type::Error;
+            response.header.cookie = message.header.cookie;
+            response.header.tx_id = message.header.tx_id;
+            const std::string str{"Unauthorized: Invalid or expired token"};
+            response.header.message_length = str.size();
+            response.attribute = Type::Response::ErrorResponse{
+                .error = str
+            };
+
+            return parseStunMessageToRaw(response);
+        }
 
         response.header.message_type = StunMessage::Type::SuccessConnectedList;
         response.header.message_length = sizeof(Type::Response::GetConnectedListResponse) * connected_clients.size();
@@ -273,6 +339,21 @@ namespace Network {
         StunMessage::StunMessageResponse response{};
 
         auto attr = std::get<Type::Request::ConnectToClientAttribute>(message.attribute);
+
+        auto peerIdOpt = jwtManager_.verifyJwt(attr.jwtToken);
+        if (!peerIdOpt) {
+            response.header.message_type = StunMessage::Type::Error;
+            response.header.cookie = message.header.cookie;
+            response.header.tx_id = message.header.tx_id;
+            const std::string str{"Unauthorized: Invalid or expired token"};
+            response.header.message_length = str.size();
+            response.attribute = Type::Response::ErrorResponse{
+                .error = str
+            };
+
+            co_return parseStunMessageToRaw(response);
+        }
+
         auto it = std::ranges::find(
             connected_clients,
             attr.clientNameToConnect,
@@ -292,15 +373,16 @@ namespace Network {
             co_return parseStunMessageToRaw(response);
         }
 
+        std::string peerId = *peerIdOpt;
         auto &&res_attr = *it;
-        const auto it_host = std::ranges::find_if(
+        const auto it_host = std::ranges::find(
             connected_clients,
-            [&](const Type::ConnectedClient& item) {
-                return *item.endpoint == *client_endpoint;
-            }
+            peerId,
+            &Type::ConnectedClient::name
         );
 
         if (it_host != connected_clients.end()) {
+            it_host->endpoint = client_endpoint;
             const auto &host = *it_host;
             co_await sendConnectMessage(res_attr, host);
         } else {
@@ -357,5 +439,43 @@ namespace Network {
             *client.endpoint,
             asio::use_awaitable
         );
+    }
+
+    void Server::saveUser(std::string_view peerId, std::string_view address, std::string_view port) {
+        std::ofstream file(CSV_FILE_PATH, std::ios::app);
+        if (!file.is_open()) return;
+
+        for (auto&& client : connected_clients) {
+            file << client.name << ','
+                 << client.endpoint->address().to_string() << ','
+                 << client.endpoint->port() << '\n';
+        }
+    }
+
+    void Server::loadUsers() {
+        try {
+            io::CSVReader<3> storage(CSV_FILE_PATH);
+            storage.read_header(io::ignore_extra_column, "peerId", "address", "port");
+
+            std::string address, peerId;
+            uint16_t port;
+
+            while (storage.read_row(peerId, address, port)) {
+                boost::system::error_code ec;
+                auto ip = asio::ip::make_address(address, ec);
+                if (!ec) {
+                    auto ep = std::make_shared<udp::endpoint>(ip, port);
+                    connected_clients.push_back(
+                        Type::ConnectedClient{
+                            .name = peerId,
+                            .endpoint = ep
+                        }
+                    );
+                }
+            }
+            std::println("Загружено {} пользователей из БД.", connected_clients.size());
+        } catch (const std::exception& ex) {
+            std::println("[БД] Файл не найден или пуст. Начинаем с чистого листа.");
+        }
     }
 }
