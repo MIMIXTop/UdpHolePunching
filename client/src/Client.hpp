@@ -21,13 +21,10 @@ namespace Network {
 
         void bindingRequest();
         asio::awaitable<void> listener();
-        void getListConnectedUsers();
-        void ConnectToClient(std::string_view clientName);
         asio::awaitable<void> sendMessage(std::vector<uint8_t> message);
         void menuLoop();
 
         void dispatchResponse(std::unique_ptr<StunMessage::StunMessageResponse> response, const udp::endpoint& endpoint);
-        asio::any_io_executor get_executor();
 
         asio::awaitable<void> initP2PConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role);
 
@@ -38,6 +35,10 @@ namespace Network {
         void MakeRequest(Type::Request::Attribute);
 
         void startConnection(uint16_t connectedPort, u_int32_t connectedTarget, StunMessage::Type role);
+
+        void handleCommand(std::string_view line);
+
+        void answerConsent(bool accept);
 
         std::vector<Type::ConnectionUser> connectionList_;
         asio::io_context& io_;
@@ -56,6 +57,7 @@ namespace Network {
         std::mutex mutex_;
         std::jthread menuThread_;
         std::atomic<AppState> appState_{AppState::Menu};
+        std::string pendingIncomingUser_ = "";
 
         MsQuicRegistration *reg_;
         MsQuicConfiguration *server_config_;

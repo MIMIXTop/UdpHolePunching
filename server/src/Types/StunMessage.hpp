@@ -12,7 +12,9 @@ namespace Network::StunMessage {
         SuccessConnectedList = 0x0102,
         ConnectToClient = 0x0003,
         SuccessConnectToClient = 0x0103,
+        IncomingConnectionRequest = 0x1234,
         ConnectToHost = 0x0104,
+        ConnectConsent = 0x0013,
         Error = 0x1111,
     };
 

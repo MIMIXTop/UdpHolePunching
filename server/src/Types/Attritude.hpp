@@ -25,7 +25,13 @@ namespace Network::Type {
             std::string error;
         };
 
-        using Attribute = std::variant<BindingAttribute, GetConnectedList, ConnectToClientAttribute, Error>;
+        struct ConnectConsentAttribute {
+            std::string jwtToken;
+            std::string targetName;
+            bool isAccepted;
+        };
+
+        using Attribute = std::variant<BindingAttribute, GetConnectedList, ConnectToClientAttribute, Error, ConnectConsentAttribute>;
 
     }
 
@@ -49,7 +55,14 @@ namespace Network::Type {
             std::string error;
         };
 
-        using Attribute = std::variant<BindingResponse, GetConnectedListResponse, ErrorResponse, ConnectToClientResponse>;
+
+        struct IncomingConnectionRequest {
+            std::string clientName;
+        };
+
+        struct ConnectConsent{};
+
+        using Attribute = std::variant<BindingResponse, GetConnectedListResponse, ErrorResponse, ConnectToClientResponse, IncomingConnectionRequest, ConnectConsent>;
     }
 }
 

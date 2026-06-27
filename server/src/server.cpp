@@ -18,6 +18,7 @@ namespace {
             case Network::StunMessage::Type::BindingRequest:
             case Network::StunMessage::Type::ConnectToClient:
             case Network::StunMessage::Type::GetConnectedList:
+            case Network::StunMessage::Type::ConnectConsent:
                 return static_cast<Network::StunMessage::Type>(val);
             default:
                 return Network::StunMessage::Type::Error;
@@ -84,9 +85,16 @@ namespace Network {
                     response_buffer = co_await handleConnectToClient(message, endpoint);
                     std::println("ConnectToClient Success");
                     break;
+                case StunMessage::Type::ConnectConsent:
+                    std::println("ConnectConsent Start");
+                    response_buffer = co_await handleConnectConsent(message, endpoint);
+                    std::println("ConnectConsent Success");
+                    break;
                 default:
                     break;
             }
+
+            if (response_buffer.empty()) co_return;
 
             co_await socket_.async_send_to(
                 asio::buffer(response_buffer),
@@ -166,6 +174,34 @@ namespace Network {
                     .jwtToken = std::string(attr.begin(), attr.end())
                 };
                 break;
+            case StunMessage::Type::ConnectConsent:{
+                if (attr.size() < sizeof(uint16_t) + 1) {
+                    request.attribute = Type::Request::Error{.error = "Empty body"};
+                    break;
+                }
+
+                uint16_t tokenSize = 0;
+                std::memcpy(&tokenSize, &attr[0], sizeof(tokenSize));
+                tokenSize = std::byteswap(tokenSize);
+
+                if (attr.size() < sizeof(tokenSize) + tokenSize + 1) {
+                    request.attribute = Type::Request::Error{.error = "Invalid format"};
+                    break;
+                }
+
+                std::string token{attr.begin() + 2, attr.begin() + 2 + tokenSize};
+
+                bool isAccepted = attr[2 + tokenSize] != 0;
+
+                std::string targetName{attr.begin() + 2 + tokenSize + 1, attr.end()};
+
+                request.attribute = Type::Request::ConnectConsentAttribute{
+                    .jwtToken = token,
+                    .targetName = targetName,
+                    .isAccepted = isAccepted
+                };
+                break;
+            }
             default:
                 request.attribute = Type::Request::Error{
                     .error = "Unknow method"
@@ -195,6 +231,7 @@ namespace Network {
                 [&](const Type::Response::ConnectToClientResponse &item) {
                     auto temp_port = std::byteswap(item.port);
                     auto temp_address = item.address;
+                    body_buffer.resize(6 + item.clientName.size()); // Выделяем память
                     std::memcpy(&body_buffer[0], &temp_port, sizeof(temp_port));
                     std::memcpy(&body_buffer[2], &temp_address, sizeof(temp_address));
                     std::ranges::copy(item.clientName, body_buffer.begin() + 6);
@@ -220,6 +257,12 @@ namespace Network {
                     body_buffer.resize(item.error.size());
                     std::ranges::copy(item.error, body_buffer.begin());
                 },
+                [&](const Type::Response::ConnectConsent& item) {
+                },
+                [&](const Type::Response::IncomingConnectionRequest& item) {
+                    body_buffer.resize(item.clientName.size());
+                    std::ranges::copy(item.clientName, body_buffer.begin());
+                }
             },
             response.attribute
         );
@@ -374,6 +417,85 @@ namespace Network {
         }
 
         std::string peerId = *peerIdOpt;
+        const auto it_host = std::ranges::find(
+            connected_clients,
+            peerId,
+            &Type::ConnectedClient::name
+        );
+
+        StunMessage::StunMessageResponse notify{};
+        notify.header.message_type = StunMessage::Type::IncomingConnectionRequest;
+        notify.header.message_length = peerIdOpt->size();
+        notify.header.cookie = 0x2112A442;
+        notify.header.tx_id = StunMessage::make_transaction_identifier();
+
+        notify.attribute = Type::Response::IncomingConnectionRequest{
+            .clientName = *peerIdOpt
+        };
+
+        co_await socket_.async_send_to(
+            asio::buffer(parseStunMessageToRaw(notify)),
+            *it->endpoint,
+            asio::use_awaitable
+        );
+
+        co_return std::vector<uint8_t>{};
+    }
+
+    asio::awaitable<std::vector<uint8_t>> Server::handleConnectConsent(const StunMessage::StunMessageRequest &message,
+        std::shared_ptr<udp::endpoint> client_endpoint) {
+
+        StunMessage::StunMessageResponse response{};
+
+        auto attr = std::get<Type::Request::ConnectConsentAttribute>(message.attribute);
+
+        auto peerIdOpt = jwtManager_.verifyJwt(attr.jwtToken);
+        if (!peerIdOpt) {
+            response.header.message_type = StunMessage::Type::Error;
+            response.header.cookie = message.header.cookie;
+            response.header.tx_id = message.header.tx_id;
+            const std::string str{"Unauthorized: Invalid or expired token"};
+            response.header.message_length = str.size();
+            response.attribute = Type::Response::ErrorResponse{
+                .error = str
+            };
+
+            co_return parseStunMessageToRaw(response);
+        }
+
+        auto it = std::ranges::find(
+            connected_clients,
+            attr.targetName,
+            &Type::ConnectedClient::name
+        );
+
+        if (it == connected_clients.end()) {
+            response.header.message_type = StunMessage::Type::Error;
+            response.header.cookie = message.header.cookie;
+            response.header.tx_id = message.header.tx_id;
+
+            response.attribute = Type::Response::ErrorResponse{
+                .error = "Not found client"
+            };
+            response.header.message_length = 16;
+
+            co_return parseStunMessageToRaw(response);
+        }
+
+        if (!attr.isAccepted) {
+            response.header.message_type = StunMessage::Type::Error;
+            response.attribute = Type::Response::ErrorResponse{.error = "Connection rejected by user"};
+            response.header.message_length = 27;
+            response.header.cookie = message.header.cookie;
+            response.header.tx_id = message.header.tx_id;
+
+            auto raw = parseStunMessageToRaw(response);
+            co_await socket_.async_send_to(asio::buffer(raw), *it->endpoint, asio::use_awaitable);
+
+            co_return std::vector<uint8_t>{};
+        }
+
+        const std::string& peerId = *peerIdOpt;
         auto &&res_attr = *it;
         const auto it_host = std::ranges::find(
             connected_clients,
@@ -385,19 +507,10 @@ namespace Network {
             it_host->endpoint = client_endpoint;
             const auto &host = *it_host;
             co_await sendConnectMessage(res_attr, host);
-        } else {
-            response.header.message_type = StunMessage::Type::Error;
-            response.header.cookie = message.header.cookie;
-            response.header.tx_id = message.header.tx_id;
-            response.attribute = Type::Response::ErrorResponse{
-                .error = "Host not binding"
-            };
-            response.header.message_length = 16;
-            co_return parseStunMessageToRaw(response);
         }
 
         response.header.message_type = StunMessage::Type::SuccessConnectToClient;
-        response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t) + attr.clientNameToConnect.size();
+        response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t) + attr.targetName.size();
         response.header.cookie = message.header.cookie;
         response.header.tx_id = message.header.tx_id;
 
@@ -407,7 +520,7 @@ namespace Network {
         std::memcpy(&client_address, &temp[0], sizeof(client_address));
 
         response.attribute = Type::Response::ConnectToClientResponse{
-            .clientName = attr.clientNameToConnect,
+            .clientName = attr.targetName,
             .address = client_address,
             .port = res_attr.endpoint->port()
         };
@@ -445,11 +558,9 @@ namespace Network {
         std::ofstream file(CSV_FILE_PATH, std::ios::app);
         if (!file.is_open()) return;
 
-        for (auto&& client : connected_clients) {
-            file << client.name << ','
-                 << client.endpoint->address().to_string() << ','
-                 << client.endpoint->port() << '\n';
-        }
+        file << peerId << ','
+                 << address << ','
+                 << port << '\n';
     }
 
     void Server::loadUsers() {
