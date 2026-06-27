@@ -45,6 +45,10 @@ Network::StunMessage::StunMessageResponse Network::parseRawMessage(std::span<uin
 
     switch (response.header.message_type) {
         case StunMessage::Type::SuccessBinding: {
+            if (attr.size() < 6) {
+                throw std::runtime_error("Malformed SuccessBinding packet");
+            }
+
             uint16_t port = 0;
             uint32_t address = 0;
             std::memcpy(&port, &attr[0], sizeof(port));
@@ -174,6 +178,14 @@ Network::StunMessage::StunMessageResponse Network::parseRawMessage(std::span<uin
             response.attribute = Type::Response::ClientPunch {
                 .address = address,
                 .port = port
+            };
+            break;
+        }
+        case StunMessage::Type::IncomingConnectionRequest: {
+            std::string callerName(attr.begin(), attr.end());
+
+            response.attribute = Type::Response::IncomingConnectionRequest {
+                .clientName = callerName
             };
             break;
         }

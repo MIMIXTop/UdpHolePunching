@@ -22,7 +22,13 @@ namespace Network::Type {
             std::string jwtToken;
         };
 
-        using Attribute = std::variant<BindingAttribute, GetConnectedList, ConnectToClientAttribute>;
+        struct ConnectConsent {
+            std::string targetName;
+            std::string jwtToken;
+            bool isAccepted;
+        };
+
+        using Attribute = std::variant<BindingAttribute, GetConnectedList, ConnectToClientAttribute, ConnectConsent>;
 
     }
 
@@ -62,6 +68,10 @@ namespace Network::Type {
             uint16_t port;
         };
 
-        using Attribute = std::variant<BindingResponse, GetConnectedListResponse, ErrorResponse, ConnectToClientResponse, ConnectToHostResponse, ServerPunch, ClientPunch>;
+        struct IncomingConnectionRequest {
+            std::string clientName;
+        };
+
+        using Attribute = std::variant<BindingResponse, GetConnectedListResponse, ErrorResponse, ConnectToClientResponse, ConnectToHostResponse, ServerPunch, ClientPunch, IncomingConnectionRequest>;
     }
 }

@@ -108,7 +108,7 @@ namespace Network {
                 menuLoop();
             });
 
-            menuThread_.detach();
+
         } catch (const std::exception &err) {
             std::println("{}", err.what());
         }
@@ -168,92 +168,31 @@ namespace Network {
     }
 
     void Client::menuLoop() {
-        for (;;) {
+        std::println("============<Menu>================");
+        std::println("Команды : ");
+        std::println("1. /login ");
+        std::println("2. /list ");
+        std::println("3. /connect 'имя_клиента'");
+        std::println("4. exit");
+
+        std::string line;
+
+        while (std::getline(std::cin, line)) {
+            if (line.empty()) continue;
+
             if (appState_ == AppState::Chat) {
-                std::println("<Chat>");
-
-                std::string line;
-                std::cin.clear();
-                while (appState_ == AppState::Chat) {
-                    if (std::getline(std::cin, line)) {
-                        if (line == "EXIT") {
-                            appState_ = AppState::Menu;
-
-                            connection_.reset();
-                            listener_.reset();
-
-                            asio::co_spawn(io_, listener(), asio::detached);
-                            break;
-                        }
-                        {
-                            std::lock_guard lk(mutex_);
-                            if (connection_) {
-                                connection_->SendMessage(line);
-                            }
-                        }
-                    }
+                if (line == "/exit") {
+                    appState_ = AppState::Menu;
+                    connection_.reset();
+                    listener_.reset();
+                    std::println("Выход из чата ...");
+                    asio::co_spawn(io_, listener(), asio::detached);
+                } else {
+                    std::unique_lock lk{mutex_};
+                    if (connection_) connection_->SendMessage(line);
                 }
-
-                continue;
-            }
-            int number = 0;
-            std::println("1. Connect to server");
-            std::println("2. Get a list of users connected to the server");
-            std::println("3. Connect to client");
-            std::print("Input your choice: ");
-            std::cin >> number;
-            switch (number) {
-                case 1: {
-                    std::unique_lock lk(mutex_);
-                    //bindingRequest();
-                    MakeRequest(
-                        Type::Request::BindingAttribute{
-                            .clientName = userName_
-                        });
-
-                    cv_.wait(lk, [this] { return startPrint_; });
-                    break;
-                }
-                case 2: {
-                    std::unique_lock lk(mutex_);
-                    MakeRequest(Type::Request::GetConnectedList{
-                        .jwtToken = token_
-                    });
-
-                    cv_.wait(lk, [this] { return startPrint_; });
-                    break;
-                }
-                case 3: {
-                    std::unique_lock lk(mutex_);
-
-                    std::string connectName;
-                    std::print("Input connect name: ");
-
-                    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-
-                    std::getline(std::cin, connectName);
-                    startP2P_ = false;
-
-                    MakeRequest(Type::Request::ConnectToClientAttribute{
-                        .clientNameToConnect = connectName,
-                        .jwtToken = token_
-                    });
-
-                    cv_.wait(lk, [this] { return startPrint_; });
-                    break;
-                }
-                default:
-                    std::println("I dont know");
-                    break;
-            }
-            startPrint_ = false;
-
-            if (appState_ == AppState::Menu) {
-                std::print("Tap any button ... ");
-                std::cin.clear();
-                std::cin.get();
-                std::cin.get();
-                system("clear");
+            } else {
+                handleCommand(line);
             }
         }
     }
@@ -345,6 +284,15 @@ namespace Network {
 
                     cv_.notify_one();
                 },
+                [&](const Type::Response::IncomingConnectionRequest& item) {
+                    std::println("\n==========================================");
+                    std::println("ВХОДЯЩИЙ ЗВОНОК!");
+                    std::println("Пользователь [{}] хочет начать чат.", item.clientName);
+                    std::println("Введите /accept чтобы принять или /reject чтобы отклонить.");
+                    std::println("==========================================\n");
+
+                    pendingIncomingUser_ = item.clientName;
+                },
             },
             response->attribute
         );
@@ -404,6 +352,7 @@ namespace Network {
                 },
                 [&](const Type::Request::ConnectToClientAttribute& item) {
                     requestType = static_cast<uint16_t>(StunMessage::Type::ConnectToClient);
+
                     requestSize = item.clientNameToConnect.size() + 2 + item.jwtToken.size();
                     payload.resize(requestSize);// Для ConnectToClient парсим: [Длина токена (2 байта)][Токен][Имя собеседника]
                     uint16_t tokenSize = item.jwtToken.size();
@@ -414,9 +363,27 @@ namespace Network {
                 },
                 [&](Type::Request::GetConnectedList item) {
                     requestType = static_cast<uint16_t>(StunMessage::Type::GetConnectedList);
-                    requestSize = token_.size();
+
+                    requestSize = item.jwtToken.size();
                     payload.assign(item.jwtToken.begin(), item.jwtToken.end());
                 },
+                [&](const Type::Request::ConnectConsent& item) {
+                    requestType = static_cast<uint16_t>(StunMessage::Type::ConnectConsent);
+
+                    uint16_t tSize = item.jwtToken.size();
+                    requestSize = sizeof(uint16_t) + tSize + 1 + item.targetName.size();
+                    payload.resize(requestSize);
+
+                    uint16_t netTokenSize = std::byteswap(tSize);
+                    std::memcpy(payload.data(), &netTokenSize, sizeof(netTokenSize));
+
+                    auto out_it = std::ranges::copy(item.jwtToken, payload.begin() + 2).out;
+
+                    *out_it = static_cast<uint8_t>(item.isAccepted);
+                    ++out_it;
+
+                    std::ranges::copy(item.targetName, out_it);
+                }
             },
             attr
         );
@@ -509,21 +476,59 @@ namespace Network {
         }
     }
 
-    void Client::bindingRequest() {
-        std::vector<uint8_t> request(20 + userName_.size());
-        uint16_t message_type = 0x0001;
-        uint16_t message_length = userName_.size();
-        uint32_t cookie = 0x2112A442;
-        std::array<uint8_t, 12> tx_id = make_transaction_identifier();
-        message_type = std::byteswap(message_type);
-        std::memcpy(&request[0], &message_type, sizeof(message_type));
-        message_length = std::byteswap(message_length);
-        std::memcpy(&request[2], &message_length, sizeof(message_length));
-        cookie = std::byteswap(cookie);
-        std::memcpy(&request[4], &cookie, sizeof(cookie));
-        std::ranges::copy(tx_id, request.begin() + 8);
-        std::ranges::copy(userName_, request.begin() + 20);
+    void Client::handleCommand(std::string_view line) {
+        if (line == "/login") {
+            MakeRequest(Type::Request::BindingAttribute{
+                .clientName = userName_
+            });
+        }
+        else if (line == "/list") {
+            MakeRequest(Type::Request::GetConnectedList{
+                .jwtToken = token_
+            });
+        }
+        else if (line.starts_with("/connect ")) {
+            std::string connectName(line.substr(9));
+            std::println("Отправка запроса пользователю {}...", connectName);
+            startP2P_ = false;
+            MakeRequest(Type::Request::ConnectToClientAttribute{
+                .clientNameToConnect = connectName,
+                .jwtToken = token_
+            });
+        }
+        else if (line == "/accept") {
+            if (pendingIncomingUser_.empty()) {
+                std::println("У вас нет входящих запросов.");
+            } else {
+                answerConsent(true);
+            }
+        }
+        else if (line == "/reject") {
+            if (pendingIncomingUser_.empty()) {
+                std::println("У вас нет входящих запросов.");
+            } else {
+                answerConsent(false);
+            }
+        }
+        else {
+            std::println("Неизвестная команда. Введите /login, /list, /connect ИМЯ, /accept или /reject");
+        }
 
-        asio::co_spawn(io_, sendMessage(std::move(request)), asio::detached);
+    }
+
+    void Client::answerConsent(bool accept) {
+        MakeRequest(Type::Request::ConnectConsent{
+            .targetName = pendingIncomingUser_,
+            .jwtToken = token_,
+            .isAccepted = accept
+        });
+
+        if (accept) {
+            std::println("Вы приняли запрос. Ожидаем установления соединения...");
+        } else {
+            std::println("Запрос отклонен.");
+        }
+
+        pendingIncomingUser_.clear();
     }
 }

@@ -31,6 +31,8 @@ namespace Network {
 
         asio::awaitable<std::vector<uint8_t>> handleConnectToClient(const StunMessage::StunMessageRequest& message, std::shared_ptr<udp::endpoint> client_endpoint);
 
+        asio::awaitable<std::vector<uint8_t>> handleConnectConsent(const StunMessage::StunMessageRequest& message, std::shared_ptr<udp::endpoint> client_endpoint);
+
         asio::awaitable<void> sendConnectMessage(const Type::ConnectedClient& client, const Type::ConnectedClient& host);
 
         void saveUser(std::string_view peerId, std::string_view address, std::string_view port);
