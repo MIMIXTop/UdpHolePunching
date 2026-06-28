@@ -16,7 +16,7 @@ namespace Network {
 
     class Client {
     public:
-        Client(asio::io_context& io, std::string_view host, std::string_view port, std::string_view userName);
+        Client(asio::io_context& io, std::string_view host, std::string_view port, std::string_view userName, int user_port);
         ~Client();
 
         void bindingRequest();

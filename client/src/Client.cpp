@@ -54,7 +54,7 @@ namespace Network {
     namespace asio = boost::asio;
     using udp = asio::ip::udp;
 
-    Client::Client(asio::io_context &io, std::string_view host, std::string_view port, std::string_view userName)
+    Client::Client(asio::io_context &io, std::string_view host, std::string_view port, std::string_view userName, int user_port)
         : io_(io),
           resolver_(io),
           serverEndpoint_(*resolver_.resolve(udp::v4(), host, port).begin()),
@@ -63,7 +63,7 @@ namespace Network {
         try {
             loadToken();
             socket_.open(udp::v4());
-            socket_.bind(udp::endpoint(udp::v4(), 0));
+            socket_.bind(udp::endpoint(udp::v4(), user_port));
 
             localPort_ = socket_.local_endpoint().port();
 
@@ -151,10 +151,7 @@ namespace Network {
 
                 std::vector<uint8_t> recv_buffer(buffer.begin(), buffer.begin() + bytes);
 
-                std::println("Recv bytes: {}", bytes);
-
                 auto response = std::make_unique<StunMessage::StunMessageResponse>(parseRawMessage(recv_buffer));
-                std::println("Message type: {}", static_cast<uint16_t>(response->header.message_type));
                 dispatchResponse(std::move(response), senderEndpoint);
             }
         } catch (const std::exception &e) {
@@ -173,7 +170,7 @@ namespace Network {
         std::println("1. /login ");
         std::println("2. /list ");
         std::println("3. /connect 'имя_клиента'");
-        std::println("4. exit");
+        std::println("4. /exit");
 
         std::string line;
 
