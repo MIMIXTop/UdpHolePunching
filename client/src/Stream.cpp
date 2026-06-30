@@ -63,6 +63,8 @@ namespace P2P {
             case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
                 self->OnPeerShutdown();
                 break;
+            case QUIC_STREAM_EVENT_CANCEL_ON_LOSS:
+                break;
             default: break;
         }
 

@@ -160,7 +160,6 @@ namespace Network {
     }
 
     asio::awaitable<void> Client::sendMessage(std::vector<uint8_t> message) {
-        std::println("Send message: {}", message);
         co_await socket_.async_send_to(asio::buffer(message), serverEndpoint_, asio::use_awaitable);
     }
 
@@ -185,7 +184,6 @@ namespace Network {
                     std::println("Выход из чата ...");
                     asio::co_spawn(io_, listener(), asio::detached);
                 } else {
-                    std::unique_lock lk{mutex_};
                     if (connection_) connection_->SendMessage(line);
                 }
             } else {
@@ -214,7 +212,6 @@ namespace Network {
                     std::println("Client name connected: {}", item.clientName);
                     std::println("ConnectToClientResponse");
 
-                    startP2P_ = !startP2P_;
                     asio::co_spawn(
                         io_,
                         initP2PConnection(item.port, item.address, StunMessage::Type::ClientPunch),
@@ -238,7 +235,6 @@ namespace Network {
                     std::println("Host address: {}", address);
                     std::println("ConnectToHostResponse");
 
-                    startP2P_ = !startP2P_;
                     asio::co_spawn(
                         io_,
                         initP2PConnection(item.port, item.address, StunMessage::Type::ServerPunch),
@@ -259,9 +255,6 @@ namespace Network {
                     startConnection(l_port, l_addr, StunMessage::Type::ClientPunch);
                     std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
 
-                    startPrint_ = true;
-
-                    cv_.notify_one();
                 },
                 [&](Type::Response::ServerPunch item) {
                     if (appState_ == AppState::Chat) return;
@@ -277,9 +270,7 @@ namespace Network {
                     startConnection(l_port, l_addr, StunMessage::Type::ServerPunch);
                     std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
 
-                    startPrint_ = true;
 
-                    cv_.notify_one();
                 },
                 [&](const Type::Response::IncomingConnectionRequest& item) {
                     std::println("\n==========================================");
@@ -293,8 +284,6 @@ namespace Network {
             },
             response->attribute
         );
-        startPrint_ = true;
-        cv_.notify_one();
     }
 
     asio::awaitable<void> Client::initP2PConnection(uint16_t connectedPort, u_int32_t connectedTarget,
@@ -487,7 +476,6 @@ namespace Network {
         else if (line.starts_with("/connect ")) {
             std::string connectName(line.substr(9));
             std::println("Отправка запроса пользователю {}...", connectName);
-            startP2P_ = false;
             MakeRequest(Type::Request::ConnectToClientAttribute{
                 .clientNameToConnect = connectName,
                 .jwtToken = token_

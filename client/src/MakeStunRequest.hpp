@@ -2,7 +2,6 @@
 
 #include "Types/Attribute.hpp"
 
-#include <cstdint>
 #include <array>
 #include <span>
 
