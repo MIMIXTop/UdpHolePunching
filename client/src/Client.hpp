@@ -16,10 +16,9 @@ namespace Network {
 
     class Client {
     public:
-        Client(asio::io_context& io, std::string_view host, std::string_view port, std::string_view userName);
+        Client(asio::io_context& io, std::string_view host, std::string_view port, std::string_view userName, int user_port);
         ~Client();
 
-        void bindingRequest();
         asio::awaitable<void> listener();
         asio::awaitable<void> sendMessage(std::vector<uint8_t> message);
         void menuLoop();
@@ -49,15 +48,10 @@ namespace Network {
         uint16_t localPort_ = 0;
 
         std::string userName_;
-        bool serverConnected_ = false;
-        bool startP2P_ = false;
-        bool startPrint_ = false;
         std::string token_;
-        std::condition_variable cv_;
-        std::mutex mutex_;
         std::jthread menuThread_;
         std::atomic<AppState> appState_{AppState::Menu};
-        std::string pendingIncomingUser_ = "";
+        std::string pendingIncomingUser_;
 
         MsQuicRegistration *reg_;
         MsQuicConfiguration *server_config_;

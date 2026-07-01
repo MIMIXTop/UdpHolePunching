@@ -417,11 +417,6 @@ namespace Network {
         }
 
         std::string peerId = *peerIdOpt;
-        const auto it_host = std::ranges::find(
-            connected_clients,
-            peerId,
-            &Type::ConnectedClient::name
-        );
 
         StunMessage::StunMessageResponse notify{};
         notify.header.message_type = StunMessage::Type::IncomingConnectionRequest;

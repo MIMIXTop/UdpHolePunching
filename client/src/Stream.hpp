@@ -6,9 +6,9 @@
 namespace P2P {
     class Stream {
     public:
-        Stream(const MsQuicConnection& conn);
+        Stream(const MsQuicConnection& conn, const MsQuicConnection* parentConnection = nullptr);
 
-        Stream(HQUIC native_stream);
+        Stream(HQUIC native_stream, const MsQuicConnection* parentConnection = nullptr);
 
         ~Stream() = default;
 
@@ -21,5 +21,6 @@ namespace P2P {
         static QUIC_STATUS QUIC_API CallbackHandle(MsQuicStream* stream, void* context, QUIC_STREAM_EVENT* event);
 
         MsQuicStream stream_;
+        const MsQuicConnection* parent_connection_;
     };
 } // P2P

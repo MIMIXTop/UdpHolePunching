@@ -1,17 +1,17 @@
 #include "Client.hpp"
 #include "MakeStunRequest.hpp"
-
-#include <iostream>
-#include <print>
-
 #include "Util/Match.hpp"
+
+#include <boost/algorithm/string/trim.hpp>
+
 
 #include <algorithm>
 #include <array>
 #include <bit>
 #include <cstring>
-#include <limits>
 #include <exception>
+#include <iostream>
+#include <print>
 #include <fstream>
 
 namespace {
@@ -54,7 +54,7 @@ namespace Network {
     namespace asio = boost::asio;
     using udp = asio::ip::udp;
 
-    Client::Client(asio::io_context &io, std::string_view host, std::string_view port, std::string_view userName)
+    Client::Client(asio::io_context &io, std::string_view host, std::string_view port, std::string_view userName, int user_port)
         : io_(io),
           resolver_(io),
           serverEndpoint_(*resolver_.resolve(udp::v4(), host, port).begin()),
@@ -63,7 +63,7 @@ namespace Network {
         try {
             loadToken();
             socket_.open(udp::v4());
-            socket_.bind(udp::endpoint(udp::v4(), 0));
+            socket_.bind(udp::endpoint(udp::v4(), user_port));
 
             localPort_ = socket_.local_endpoint().port();
 
@@ -108,7 +108,7 @@ namespace Network {
                 menuLoop();
             });
 
-
+            menuThread_.detach();
         } catch (const std::exception &err) {
             std::println("{}", err.what());
         }
@@ -130,9 +130,8 @@ namespace Network {
                 if (appState_ == AppState::Chat) co_return;
                 std::array<uint8_t, 1024> buffer{};
                 udp::endpoint senderEndpoint;
-                size_t bytes = 0;
                 try {
-                    bytes = co_await socket_.async_receive_from(
+                    co_await socket_.async_receive_from(
                         asio::buffer(buffer),
                         senderEndpoint,
                         asio::use_awaitable
@@ -149,12 +148,7 @@ namespace Network {
 
                 if (appState_ == AppState::Chat) continue;
 
-                std::vector<uint8_t> recv_buffer(buffer.begin(), buffer.begin() + bytes);
-
-                std::println("Recv bytes: {}", bytes);
-
-                auto response = std::make_unique<StunMessage::StunMessageResponse>(parseRawMessage(recv_buffer));
-                std::println("Message type: {}", static_cast<uint16_t>(response->header.message_type));
+                auto response = std::make_unique<StunMessage::StunMessageResponse>(parseRawMessage(buffer));
                 dispatchResponse(std::move(response), senderEndpoint);
             }
         } catch (const std::exception &e) {
@@ -163,7 +157,6 @@ namespace Network {
     }
 
     asio::awaitable<void> Client::sendMessage(std::vector<uint8_t> message) {
-        std::println("Send message: {}", message);
         co_await socket_.async_send_to(asio::buffer(message), serverEndpoint_, asio::use_awaitable);
     }
 
@@ -173,7 +166,7 @@ namespace Network {
         std::println("1. /login ");
         std::println("2. /list ");
         std::println("3. /connect 'имя_клиента'");
-        std::println("4. exit");
+        std::println("4. /exit");
 
         std::string line;
 
@@ -188,10 +181,10 @@ namespace Network {
                     std::println("Выход из чата ...");
                     asio::co_spawn(io_, listener(), asio::detached);
                 } else {
-                    std::unique_lock lk{mutex_};
                     if (connection_) connection_->SendMessage(line);
                 }
             } else {
+                boost::trim(line);
                 handleCommand(line);
             }
         }
@@ -217,7 +210,6 @@ namespace Network {
                     std::println("Client name connected: {}", item.clientName);
                     std::println("ConnectToClientResponse");
 
-                    startP2P_ = !startP2P_;
                     asio::co_spawn(
                         io_,
                         initP2PConnection(item.port, item.address, StunMessage::Type::ClientPunch),
@@ -241,7 +233,6 @@ namespace Network {
                     std::println("Host address: {}", address);
                     std::println("ConnectToHostResponse");
 
-                    startP2P_ = !startP2P_;
                     asio::co_spawn(
                         io_,
                         initP2PConnection(item.port, item.address, StunMessage::Type::ServerPunch),
@@ -262,9 +253,6 @@ namespace Network {
                     startConnection(l_port, l_addr, StunMessage::Type::ClientPunch);
                     std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
 
-                    startPrint_ = true;
-
-                    cv_.notify_one();
                 },
                 [&](Type::Response::ServerPunch item) {
                     if (appState_ == AppState::Chat) return;
@@ -280,9 +268,7 @@ namespace Network {
                     startConnection(l_port, l_addr, StunMessage::Type::ServerPunch);
                     std::println("\nСоединение готово. Введите сообщение и нажмите Enter для отправки:");
 
-                    startPrint_ = true;
 
-                    cv_.notify_one();
                 },
                 [&](const Type::Response::IncomingConnectionRequest& item) {
                     std::println("\n==========================================");
@@ -296,8 +282,6 @@ namespace Network {
             },
             response->attribute
         );
-        startPrint_ = true;
-        cv_.notify_one();
     }
 
     asio::awaitable<void> Client::initP2PConnection(uint16_t connectedPort, u_int32_t connectedTarget,
@@ -468,8 +452,6 @@ namespace Network {
                     }
                     break;
                 }
-                default:
-                    throw std::runtime_error("Unknown role");
             }
         } catch (const std::exception &e) {
             std::println("Error: {}", e.what());
@@ -490,7 +472,6 @@ namespace Network {
         else if (line.starts_with("/connect ")) {
             std::string connectName(line.substr(9));
             std::println("Отправка запроса пользователю {}...", connectName);
-            startP2P_ = false;
             MakeRequest(Type::Request::ConnectToClientAttribute{
                 .clientNameToConnect = connectName,
                 .jwtToken = token_
