@@ -9,6 +9,7 @@
 #include <format>
 #include <ranges>
 #include <algorithm>
+#include <fstream>
 
 namespace {
     constexpr auto CSV_FILE_PATH = "/home/mimixtop/Project/UdpHolePunching/server/data.csv";
@@ -29,6 +30,13 @@ namespace {
         std::array<uint8_t, 4> address_bytes{};
         std::memcpy(&address_bytes[0], &target, sizeof(target));
         return std::format("{}.{}.{}.{}", address_bytes[0], address_bytes[1], address_bytes[2], address_bytes[3]);
+    }
+
+    bool sameEndpoint(
+        const std::shared_ptr<Network::udp::endpoint>& lhs,
+        const std::shared_ptr<Network::udp::endpoint>& rhs) {
+        if (!lhs || !rhs) return false;
+        return lhs->address() == rhs->address() && lhs->port() == rhs->port();
     }
 }
 
@@ -281,16 +289,15 @@ namespace Network {
 
         auto attr = std::get<Type::Request::BindingAttribute>(message.attribute);
 
-        auto it = std::ranges::find(
-            connected_clients,
-            attr.clientName,
-            &Type::ConnectedClient::name
-        );
-
-        if (it == connected_clients.end()) {
-            connected_clients.push_back(Type::ConnectedClient{.name = attr.clientName, .endpoint = client_endpoint});
+        auto* client = findClient(attr.clientName);
+        if (client == nullptr) {
+            connected_clients.push_back(Type::ConnectedClient{
+                .name = attr.clientName,
+                .endpoint = client_endpoint
+            });
+            client = &connected_clients.back();
         } else {
-            it->endpoint = client_endpoint;
+            client->endpoint = client_endpoint;
         }
 
         auto tokenObj = jwtManager_.makeToken(attr.clientName);
@@ -308,11 +315,7 @@ namespace Network {
             return parseStunMessageToRaw(response);
         }
 
-        saveUser(
-            attr.clientName,
-            client_endpoint->address().to_string(),
-            std::to_string(client_endpoint->port())
-            );
+        saveUser(*client);
 
         response.header.message_type = StunMessage::Type::SuccessBinding;
         response.header.message_length = sizeof(uint16_t) + sizeof(uint32_t) + tokenObj->size();
@@ -366,6 +369,7 @@ namespace Network {
         uint16_t total_length = sizeof(uint16_t);
 
         std::ranges::for_each(connected_clients, [&](auto &&item) {
+            if (!item.endpoint || item.name == *peerId) return;
             body.connectedList.push_back(item.name);
 
             total_length += sizeof(uint16_t) + item.name.size();
@@ -403,15 +407,15 @@ namespace Network {
             &Type::ConnectedClient::name
         );
 
-        if (it == connected_clients.end()) {
+        if (it == connected_clients.end() || !it->endpoint) {
             response.header.message_type = StunMessage::Type::Error;
             response.header.cookie = message.header.cookie;
             response.header.tx_id = message.header.tx_id;
 
             response.attribute = Type::Response::ErrorResponse{
-                .error = "Not found client"
+                .error = "Not found online client"
             };
-            response.header.message_length = 16;
+            response.header.message_length = 23;
 
             co_return parseStunMessageToRaw(response);
         }
@@ -469,15 +473,15 @@ namespace Network {
             &Type::ConnectedClient::name
         );
 
-        if (it == connected_clients.end()) {
+        if (it == connected_clients.end() || !it->endpoint) {
             response.header.message_type = StunMessage::Type::Error;
             response.header.cookie = message.header.cookie;
             response.header.tx_id = message.header.tx_id;
 
             response.attribute = Type::Response::ErrorResponse{
-                .error = "Not found client"
+                .error = "Not found online client"
             };
-            response.header.message_length = 16;
+            response.header.message_length = 23;
 
             co_return parseStunMessageToRaw(response);
         }
@@ -505,6 +509,7 @@ namespace Network {
 
         if (it_host != connected_clients.end()) {
             it_host->endpoint = client_endpoint;
+            saveUser(*it_host);
             const auto &host = *it_host;
             co_await sendConnectMessage(res_attr, host);
         }
@@ -530,6 +535,8 @@ namespace Network {
 
     asio::awaitable<void> Server::sendConnectMessage(const Type::ConnectedClient &client,
                                                      const Type::ConnectedClient &host) {
+        if (!client.endpoint || !host.endpoint) co_return;
+
         StunMessage::StunMessageResponse response{};
 
         response.header.message_type = StunMessage::Type::ConnectToHost;
@@ -554,36 +561,64 @@ namespace Network {
         );
     }
 
-    void Server::saveUser(std::string_view peerId, std::string_view address, std::string_view port) {
-        std::ofstream file(CSV_FILE_PATH, std::ios::app);
+    void Server::saveUser(const Type::ConnectedClient& user) {
+        auto existing = std::ranges::find(connected_clients, user.name, &Type::ConnectedClient::name);
+        if (existing == connected_clients.end()) {
+            connected_clients.push_back(user);
+        } else {
+            if (!sameEndpoint(existing->endpoint, user.endpoint)) {
+                existing->endpoint = user.endpoint;
+            }
+        }
+        persistUsers();
+    }
+
+    void Server::persistUsers() const {
+        std::ofstream file(CSV_FILE_PATH, std::ios::trunc);
         if (!file.is_open()) return;
 
-        file << peerId << ','
+        file << "peerId,address,port\n";
+        for (const auto& user : connected_clients) {
+            std::string address = "0.0.0.0";
+            uint16_t port = 0;
+            if (user.endpoint) {
+                address = user.endpoint->address().to_string();
+                port = user.endpoint->port();
+            }
+            file << user.name << ','
                  << address << ','
                  << port << '\n';
+        }
     }
 
     void Server::loadUsers() {
+        connected_clients.clear();
+
         try {
             io::CSVReader<3> storage(CSV_FILE_PATH);
             storage.read_header(io::ignore_extra_column, "peerId", "address", "port");
 
             std::string address, peerId;
-            uint16_t port;
-
+            uint16_t port = 0;
             while (storage.read_row(peerId, address, port)) {
                 boost::system::error_code ec;
                 auto ip = asio::ip::make_address(address, ec);
-                if (!ec) {
-                    auto ep = std::make_shared<udp::endpoint>(ip, port);
-                    connected_clients.push_back(
-                        Type::ConnectedClient{
-                            .name = peerId,
-                            .endpoint = ep
-                        }
-                    );
+                std::shared_ptr<udp::endpoint> ep{};
+                if (!ec && port != 0) {
+                    ep = std::make_shared<udp::endpoint>(ip, port);
+                }
+
+                auto* existing = findClient(peerId);
+                if (existing == nullptr) {
+                    connected_clients.push_back(Type::ConnectedClient{
+                        .name = peerId,
+                        .endpoint = ep
+                    });
+                } else if (!sameEndpoint(existing->endpoint, ep)) {
+                    existing->endpoint = ep;
                 }
             }
+
             std::println("Загружено {} пользователей из БД.", connected_clients.size());
         } catch (const std::exception& ex) {
             std::println("[БД] Файл не найден или пуст. Начинаем с чистого листа.");

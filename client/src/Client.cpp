@@ -1,17 +1,17 @@
 #include "Client.hpp"
 #include "MakeStunRequest.hpp"
-
-#include <iostream>
-#include <print>
-
 #include "Util/Match.hpp"
+
+#include <boost/algorithm/string/trim.hpp>
+
 
 #include <algorithm>
 #include <array>
 #include <bit>
 #include <cstring>
-#include <limits>
 #include <exception>
+#include <iostream>
+#include <print>
 #include <fstream>
 
 namespace {
@@ -108,7 +108,7 @@ namespace Network {
                 menuLoop();
             });
 
-
+            menuThread_.detach();
         } catch (const std::exception &err) {
             std::println("{}", err.what());
         }
@@ -130,9 +130,8 @@ namespace Network {
                 if (appState_ == AppState::Chat) co_return;
                 std::array<uint8_t, 1024> buffer{};
                 udp::endpoint senderEndpoint;
-                size_t bytes = 0;
                 try {
-                    bytes = co_await socket_.async_receive_from(
+                    co_await socket_.async_receive_from(
                         asio::buffer(buffer),
                         senderEndpoint,
                         asio::use_awaitable
@@ -149,9 +148,7 @@ namespace Network {
 
                 if (appState_ == AppState::Chat) continue;
 
-                std::vector<uint8_t> recv_buffer(buffer.begin(), buffer.begin() + bytes);
-
-                auto response = std::make_unique<StunMessage::StunMessageResponse>(parseRawMessage(recv_buffer));
+                auto response = std::make_unique<StunMessage::StunMessageResponse>(parseRawMessage(buffer));
                 dispatchResponse(std::move(response), senderEndpoint);
             }
         } catch (const std::exception &e) {
@@ -187,6 +184,7 @@ namespace Network {
                     if (connection_) connection_->SendMessage(line);
                 }
             } else {
+                boost::trim(line);
                 handleCommand(line);
             }
         }
@@ -454,8 +452,6 @@ namespace Network {
                     }
                     break;
                 }
-                default:
-                    throw std::runtime_error("Unknown role");
             }
         } catch (const std::exception &e) {
             std::println("Error: {}", e.what());

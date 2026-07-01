@@ -3,6 +3,7 @@
 //
 
 #include "Stream.hpp"
+#include "QuicNetLog.hpp"
 
 #include <cstring>
 #include <memory>
@@ -12,13 +13,16 @@
 
 
 namespace P2P {
-    Stream::Stream(const MsQuicConnection &conn) :
-     stream_(conn, QUIC_STREAM_OPEN_FLAG_NONE, CleanUpManual, CallbackHandle, this) {
+    Stream::Stream(const MsQuicConnection &conn, const MsQuicConnection* parentConnection) :
+     stream_(conn, QUIC_STREAM_OPEN_FLAG_NONE, CleanUpManual, CallbackHandle, this),
+     parent_connection_(parentConnection == nullptr ? &conn : parentConnection) {
         std::println("Create stream native");
         stream_.Start(QUIC_STREAM_START_FLAG_IMMEDIATE);
     }
 
-    Stream::Stream(HQUIC native_stream) : stream_(native_stream, CleanUpManual, CallbackHandle, this) {
+    Stream::Stream(HQUIC native_stream, const MsQuicConnection* parentConnection) :
+    stream_(native_stream, CleanUpManual, CallbackHandle, this),
+    parent_connection_(parentConnection) {
         std::println("Create stream native");
         stream_.Start();
     }
@@ -64,6 +68,11 @@ namespace P2P {
                 self->OnPeerShutdown();
                 break;
             case QUIC_STREAM_EVENT_CANCEL_ON_LOSS:
+                QuicNetLog::Event("WARN", "stream", "cancel-on-loss", "send canceled due to packet loss");
+                if (self->parent_connection_ != nullptr) {
+                    QuicNetLog::PacketLoss("stream", "cancel-on-loss", *self->parent_connection_);
+                }
+                std::println("Packet loss error code: 0x{:x}", event->CANCEL_ON_LOSS.ErrorCode);
                 break;
             default: break;
         }
