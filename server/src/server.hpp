@@ -35,10 +35,7 @@ namespace Network {
 
         asio::awaitable<void> sendConnectMessage(const Type::ConnectedClient& client, const Type::ConnectedClient& host);
 
-        Type::ConnectedClient* findClient(std::string_view peerId);
-        const Type::ConnectedClient* findClient(std::string_view peerId) const;
-        void saveUser(const Type::ConnectedClient& user);
-        void persistUsers() const;
+        void saveUser(std::string_view peerId, std::string_view address, std::string_view port);
         void loadUsers();
 
         std::vector<Type::ConnectedClient> connected_clients {};
